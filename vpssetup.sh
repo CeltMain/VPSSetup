@@ -68,19 +68,48 @@ if [ "$SSH_SKIP" != true ]; then
   fi
 fi
 
-# Swapfile 2gb
+# Swap file 2gb
 echo
-echo "=== Swapfile Setup ==="
-if [ ! -f /swapfile ]; then
-    sudo fallocate -l 2G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048
-    sudo chmod 600 /swapfile
-    sudo mkswap /swapfile
-    sudo swapon /swapfile
-    echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+echo "=== Swap file Setup ==="
+TOTAL_RAM=$(free -m | awk '/^Mem:/{print $2}')
+if [ "$TOTAL_RAM" -le 1024 ]; then
+    echo "Detected low RAM: ${TOTAL_RAM}MB (<= 1GB)"
+    while true; do
+        echo "Do you want to create a 2GB swap file? (y/n) (Default: y)"
+        read -p "Your choice: " SWAP_INPUT
+        if [ -z "$SWAP_INPUT" ]; then
+            SWAP_INPUT="y"
+            echo -e "\e[1A\e[KYour choice: y"
+        fi
+        if [ "${SWAP_INPUT,,}" = "y" ] || [ "${SWAP_INPUT,,}" = "yes" ]; then
+            CREATE_SWAP=true
+            break
+        elif [ "${SWAP_INPUT,,}" = "n" ] || [ "${SWAP_INPUT,,}" = "no" ]; then
+            CREATE_SWAP=false
+            echo "Skipping swap file creation."
+            break
+        else
+            echo -e "Error: Invalid input. Please enter 'y' or 'n'\n"
+        fi
+    done
 else
-    echo "Swapfile exist, skip creating."
-    echo
+    echo "Detected sufficient RAM: ${TOTAL_RAM}MB (> 1GB). Swap file not required."
+    CREATE_SWAP=false
 fi
+if [ "$CREATE_SWAP" = true ]; then
+    if [ ! -f /swapfile ]; then
+        echo "Creating a 2GB swap file..."
+        sudo fallocate -l 2G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048
+        sudo chmod 600 /swapfile
+        sudo mkswap /swapfile
+        sudo swapon /swapfile
+        echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+        echo "Swapfile successfully created and activated."
+    else
+        echo "Swapfile already exists, skipping creation."
+    fi
+fi
+echo
 free -h
 
 # DNS over TLS
