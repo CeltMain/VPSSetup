@@ -20,7 +20,7 @@ if [ -z "$CURRENT_PORT" ]; then CURRENT_PORT=22; fi
 # If SSH-port already custom (not 22)
 if [ "$CURRENT_PORT" -ne 22 ]; then
     while true; do
-        echo "Your SSH-port: $CURRENT_PORT. Do you want to change it? (y/n) (Default: n)"
+        echo "Your SSH-port: $CURRENT_PORT. Do you want to change it? (y/n) [Default: n]"
         read -p "Your choice: " CHANGE_INPUT
         # If pressed Enter — write "n" and set SSH-port
         if [ -z "$CHANGE_INPUT" ]; then
@@ -74,7 +74,7 @@ echo "=== Swap file Setup ==="
 TOTAL_RAM=$(free -m | awk '/^Mem:/{print $2}')
 echo "Detected RAM: ${TOTAL_RAM}MB"
 while true; do
-    echo "Do you want to create a swap file? (y/n) (Default: y)"
+    echo "Do you want to create a swap file? (y/n) [Default: y]"
     read -p "Your choice: " SWAP_INPUT
     if [ -z "$SWAP_INPUT" ]; then
         SWAP_INPUT="y"
@@ -96,7 +96,7 @@ if [ "$CREATE_SWAP" = true ]; then
         EXISTING_SWAP_SIZE=$(du -sh /swapfile | awk '{print $1}')
         while true; do
             echo "Swapfile already exists. Current size is: $EXISTING_SWAP_SIZE"
-            echo "Do you want to replace it with a new size? (y/n) (Default: n)"
+            echo "Do you want to replace it with a new size? (y/n) [Default: n]"
             read -p "Your choice: " REPLACE_INPUT
             if [ -z "$REPLACE_INPUT" ]; then 
                 REPLACE_INPUT="n"
@@ -152,7 +152,7 @@ free -h
 echo
 echo "=== DNS over TLS (DoT) Setup ==="
 while true; do
-    echo "Do you want to enable DNS over TLS (DoT)? (y/n) (Default: y)"
+    echo "Do you want to enable DNS over TLS (DoT)? (y/n) [Default: y]"
     read -p "Your choice: " DOT_INPUT
     if [ -z "$DOT_INPUT" ]; then
         DOT_INPUT="y"
