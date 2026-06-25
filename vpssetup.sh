@@ -112,7 +112,7 @@ if [ "$ENABLE_DOT" = true ]; then
         echo "  1) Quad9 (Privacy) [Default]"
         echo "  2) Cloudflare (Speed)"
         echo "  3) Google (Stability)"
-        echo "  4) Yandex (RU segment)"
+        echo "  4) Yandex (Good for RU segment, Basic filtering)"
         echo "  5) Google + Cloudflare (Max Stability & Speed)"
         echo "  6) Quad9 + Cloudflare (Max Privacy & Speed)"
         read -p "Your choice (1-6): " DNS_CHOICE
