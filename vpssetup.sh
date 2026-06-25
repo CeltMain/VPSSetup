@@ -227,6 +227,7 @@ echo "=== Configuring SSH Port ==="
 # Find row "#Port 22" and change on $SSH_PORT
 sudo sed -i "s/^#\?Port .*/Port $SSH_PORT/" /etc/ssh/sshd_config
 sudo rm -f /etc/ssh/sshd_config.d/*.conf || true
+sudo mkdir -p /run/sshd
 sudo sshd -t
 sudo systemctl daemon-reload
 sudo systemctl restart ssh.socket ssh.service || sudo systemctl restart ssh
