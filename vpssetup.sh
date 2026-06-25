@@ -86,18 +86,98 @@ free -h
 # DNS over TLS
 echo
 echo "=== DNS over TLS (DoT) Setup ==="
-sudo mkdir -p /etc/systemd/resolved.conf.d
-sudo tee /etc/systemd/resolved.conf.d/quad9.conf > /dev/null <<EOT
+while true; do
+    echo "Do you want to enable DNS over TLS (DoT)? (y/n) (Default: y)"
+    read -p "Your choice: " DOT_INPUT
+    if [ -z "$DOT_INPUT" ]; then
+        DOT_INPUT="y"
+        echo -e "\e[1A\e[KYour choice: y"
+    fi
+    if [ "${DOT_INPUT,,}" = "y" ] || [ "${DOT_INPUT,,}" = "yes" ]; then
+        ENABLE_DOT=true
+        echo "Proceeding to configure DNS over TLS..."
+        break
+    elif [ "${DOT_INPUT,,}" = "n" ] || [ "${DOT_INPUT,,}" = "no" ]; then
+        ENABLE_DOT=false
+        echo "Skipping DNS over TLS setup."
+        break
+    else
+        echo -e "Error: Invalid input. Please enter 'y' or 'n'\n"
+    fi
+done
+if [ "$ENABLE_DOT" = true ]; then
+    while true; do
+        echo
+        echo "Select DNS provider:"
+        echo "  1) Quad9 (Privacy) [Default]"
+        echo "  2) Cloudflare (Speed)"
+        echo "  3) Google (Stability)"
+        echo "  4) Yandex (RU segment)"
+        echo "  5) Google + Cloudflare (Max Stability & Speed)"
+        echo "  6) Quad9 + Cloudflare (Max Privacy & Speed)"
+        read -p "Your choice (1-6): " DNS_CHOICE
+        if [ -z "$DNS_CHOICE" ]; then
+            DNS_CHOICE="1"
+            echo -e "\e[1A\e[KYour choice (1-6): 1"
+        fi
+        DNSSEC_POLICY="yes"
+        case "$DNS_CHOICE" in
+            1)
+                DNS_SERVERS="9.9.9.9 149.112.112.112"
+                PROVIDER_NAME="Quad9"
+                break
+                ;;
+            2)
+                DNS_SERVERS="1.1.1.1 1.0.0.1"
+                PROVIDER_NAME="Cloudflare"
+                break
+                ;;
+            3)
+                DNS_SERVERS="8.8.8.8 8.8.4.4"
+                PROVIDER_NAME="Google"
+                break
+                ;;
+            4)
+                DNS_SERVERS="77.88.8.8 77.88.8.1"
+                PROVIDER_NAME="Yandex"
+                DNSSEC_POLICY="allow-downgrade"
+                break
+                ;;
+            5)
+                DNS_SERVERS="8.8.8.8 1.1.1.1 8.8.4.4 1.0.0.1"
+                PROVIDER_NAME="Google + Cloudflare"
+                break
+                ;;
+            6)
+                DNS_SERVERS="9.9.9.9 1.1.1.1 149.112.112.112 1.0.0.1"
+                PROVIDER_NAME="Quad9 + Cloudflare"
+                break
+                ;;
+            *)
+                echo "Error: Invalid choice. Please enter a number between 1 and 6."
+                ;;
+        esac
+    done
+    echo "Configuring $PROVIDER_NAME DNS over TLS (DNSSEC: $DNSSEC_POLICY)..."
+    sudo rm -f /etc/systemd/resolved.conf.d/*.conf || true
+    sudo mkdir -p /etc/systemd/resolved.conf.d
+    sudo tee /etc/systemd/resolved.conf.d/dot-custom.conf > /dev/null <<EOT
 [Resolve]
-DNS=9.9.9.9 149.112.112.112 1.1.1.1
+DNS=$DNS_SERVERS
 Domains=~.
 DNSOverTLS=yes
+DNSSEC=$DNSSEC_POLICY
 EOT
-sudo systemctl daemon-reload
-sudo systemctl restart systemd-resolved
-NET_INT=$(ip route | grep default | awk '{print $5}')
-sudo resolvectl dns $NET_INT "" && sudo resolvectl domain $NET_INT "~." || true
-resolvectl status
+    sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+    sudo systemctl daemon-reload
+    sudo systemctl restart systemd-resolved
+    NET_INT=$(ip route | grep default | awk '{print $5}')
+    if [ -n "$NET_INT" ]; then
+        sudo resolvectl dns "$NET_INT" ""
+        sudo resolvectl domain "$NET_INT" ""
+    fi
+    resolvectl status
+fi
 
 # SSH && UFW
 sudo sed -i 's/IPV6=yes/IPV6=no/' /etc/default/ufw
@@ -145,4 +225,4 @@ echo
 echo "=== Cleaning Servise ==="
 sudo apt-get autoremove -y
 sudo apt-get clean
-echo "Clear"
+echo "Cleared"
