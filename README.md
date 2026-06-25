@@ -1,4 +1,6 @@
-<img width="280" height="280" alt="IMG_20250403_225327_985 (3)" src="https://github.com/user-attachments/assets/9c7ff9b4-0ef0-452c-9600-1d5fff07a83d" />
+<div align="center">
+  <img width="280" height="280" alt="IMG_20250403_225327_985 (3)" src="https://github.com/user-attachments/assets/9c7ff9b4-0ef0-452c-9600-1d5fff07a83d" />
+</div>
 
 Что делает скрипт? Базовая, минимальная автоматизация настройки свежей VPS.
 ***
