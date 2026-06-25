@@ -1,5 +1,4 @@
-<img width="964" height="964" alt="IMG_20250403_225327_985 (3)" src="https://github.com/user-attachments/assets/9c7ff9b4-0ef0-452c-9600-1d5fff07a83d" />
-
+<img width="280" height="280" alt="IMG_20250403_225327_985 (3)" src="https://github.com/user-attachments/assets/9c7ff9b4-0ef0-452c-9600-1d5fff07a83d" />
 Что делает скрипт? Базовая, минимальная автоматизация настройки свежей VPS.
 ***
 - Позволяет установить порт SSH на выбор
