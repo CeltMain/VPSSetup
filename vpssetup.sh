@@ -176,8 +176,8 @@ EOT
         sudo resolvectl dns "$NET_INT" ""
         sudo resolvectl domain "$NET_INT" ""
     fi
-    resolvectl status
 fi
+resolvectl status
 
 # SSH && UFW
 sudo sed -i 's/IPV6=yes/IPV6=no/' /etc/default/ufw
@@ -213,7 +213,7 @@ sudo ufw --force enable && sudo ufw status numbered || true
 # Auto Security Updates
 echo
 echo "=== Enabling Auto Security Updates Setup ==="
-sudo apt-get install unattended-upgrades -y
+sudo apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" install unattended-upgrades -y
 sudo tee /etc/apt/apt.conf.d/20auto-upgrades > /dev/null <<EOT
 APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
