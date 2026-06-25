@@ -92,25 +92,26 @@ while true; do
     fi
 done
 if [ "$CREATE_SWAP" = true ]; then
-    if [ -f /swapfile ]; then
-        EXISTING_SWAP_SIZE=$(du -sh /swapfile | awk '{print $1}')
+    CURRENT_ACTIVE_SWAP=$(free -m | awk '/^Swap:/{print $2}')
+    if [ "$CURRENT_ACTIVE_SWAP" -gt 0 ]; then
+        EXISTING_SWAP_SIZE=$(free -h | awk '/^Swap:/{print $2}')
         while true; do
-            echo "Swapfile already exists. Current size is: $EXISTING_SWAP_SIZE"
-            echo "Do you want to replace it with a new size? (y/n) [Default: n]"
+            echo "Active Swap detected. Total current size is: $EXISTING_SWAP_SIZE"
+            echo "Do you want to REMOVE ALL existing swap sources and create ONE clean swap file? (y/n) [Default: n]"
             read -p "Your choice: " REPLACE_INPUT
             if [ -z "$REPLACE_INPUT" ]; then 
                 REPLACE_INPUT="n"
                 echo -e "\e[1A\e[KYour choice: n"
             fi
             if [ "${REPLACE_INPUT,,}" = "y" ] || [ "${REPLACE_INPUT,,}" = "yes" ]; then
-                echo "Deactivating and removing old swapfile..."
-                sudo swapoff /swapfile || true
+                echo "Deactivating ALL current swap sources..."
+                sudo swapoff -a || true
                 sudo rm -f /swapfile
-                sudo sed -i '\/swapfile none swap sw 0 0/d' /etc/fstab
+                sudo sed -i '/swap/d' /etc/fstab
                 break
             elif [ "${REPLACE_INPUT,,}" = "n" ] || [ "${REPLACE_INPUT,,}" = "no" ]; then
                 SKIP_CREATION=true
-                echo "Keeping existing swapfile."
+                echo "Keeping existing swap configuration."
                 break
             else
                 echo -e "Error: Invalid input. Please enter 'y' or 'n'\n"
@@ -133,20 +134,17 @@ if [ "$CREATE_SWAP" = true ]; then
                 echo -e "Error: Invalid format. Please enter a positive integer (e.g. 1, 2, 4).\n"
             fi
         done
-        echo "Creating a ${SWAP_SIZE}GB swap file..."
+        echo "Creating a new ${SWAP_SIZE}GB swap file..."
         sudo fallocate -l "${SWAP_SIZE}G" /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=$((SWAP_SIZE * 1024))
         sudo chmod 600 /swapfile
         sudo mkswap /swapfile
         sudo swapon /swapfile
-        if ! grep -q "/swapfile none swap" /etc/fstab; then
-            echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-        fi
-        echo "Swapfile successfully created and activated."
+        echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+        echo "New swapfile successfully created and activated."
     fi
 fi
 echo
 free -h
-
 
 # DNS over TLS
 echo
