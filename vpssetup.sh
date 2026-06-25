@@ -105,8 +105,16 @@ if [ "$CREATE_SWAP" = true ]; then
             fi
             if [ "${REPLACE_INPUT,,}" = "y" ] || [ "${REPLACE_INPUT,,}" = "yes" ]; then
                 echo "Deactivating ALL current swap sources..."
+                OTHER_SWAPS=$(swapon --show=NAME,TYPE | grep "file" | awk '{print $1}' | grep -v "/swapfile" || true)
                 sudo swapoff -a || true
-                sudo rm -f /swapfile
+                for s_file in $OTHER_SWAPS; do
+                    if [ -f "$s_file" ]; then
+                        echo "Removing old swap file with custom name: $s_file"
+                        sudo rm -f "$s_file"
+                        sudo sed -i "\|$s_file|d" /etc/fstab
+                    fi
+                done
+                sudo rm -f /swapfile /swap.img
                 sudo sed -i '/swap/d' /etc/fstab
                 break
             elif [ "${REPLACE_INPUT,,}" = "n" ] || [ "${REPLACE_INPUT,,}" = "no" ]; then
@@ -286,7 +294,35 @@ echo "Done"
 
 # Cleaning Servise
 echo
-echo "=== Cleaning Servise ==="
-sudo apt-get autoremove -y
-sudo apt-get clean
+echo "=== Cleaning Service & Deep Disk Cleanup ==="
+if [ -f /swap.img ]; then
+    echo "Found old /swap.img. Deactivating and removing..."
+    sudo swapoff /swap.img 2>/dev/null || true
+    sudo rm -f /swap.img
+    sudo sed -i '\/swap.img/d' /etc/fstab
+fi
+if command -v journalctl >/dev/null 2>&1; then
+    echo "Vacuuming systemd journal logs to 100M..."
+    sudo journalctl --vacuum-size=100M >/dev/null 2>&1 || true
+fi
+echo "Clearing heavy system logs..."
+sudo truncate -s 0 /var/log/syslog 2>/dev/null || true
+sudo rm -f /var/log/syslog.1 2>/dev/null || true
+sudo rm -f /var/log/syslog.*.gz 2>/dev/null || true
+if [ -f /etc/logrotate.d/rsyslog ]; then
+    echo "Optimizing logrotate configuration for syslog..."
+    sudo sed -i 's/weekly/daily\n        maxsize 50M/' /etc/logrotate.d/rsyslog
+    sudo sed -i 's/rotate 4/rotate 2/' /etc/logrotate.d/rsyslog
+    sudo sed -i 's/rotate 7/rotate 2/' /etc/logrotate.d/rsyslog
+fi
+if command -v docker >/dev/null 2>&1; then
+    echo "Cleaning unused Docker resources..."
+    sudo docker system prune -f >/dev/null 2>&1 || true
+fi
+echo "Running APT package cleanup..."
+sudo apt-get autoclean -y
+sudo apt-get autoremove --purge -y
+sudo apt-get clean -y
 echo "Cleared"
+echo
+df -h /
