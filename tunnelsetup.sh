@@ -7,7 +7,7 @@ set -e
 USERNAME="sshtunneluser"
 # ------------------
 
-echo "=== Starting SSH Tunnel User Configuration ==="
+echo "=== Starting SSH Tunnel + SFTP User Configuration ==="
 
 # 1. Check root privileges
 if [ "$EUID" -ne 0 ]; then
@@ -23,7 +23,12 @@ else
   useradd -m -s /bin/false "$USERNAME"
 fi
 
-# 3. Setup .ssh directory
+# 3. CRITICAL FOR CHROOT: Home directory must be owned by root
+echo "Configuring Chroot permissions for home directory..."
+chown root:root "/home/$USERNAME"
+chmod 755 "/home/$USERNAME"
+
+# 4. Setup .ssh directory
 SSH_DIR="/home/$USERNAME/.ssh"
 
 if [ -d "$SSH_DIR" ]; then
@@ -33,48 +38,55 @@ else
   mkdir -p "$SSH_DIR"
 fi
 
-# [FIXED] Force correct ownership for the entire home directory and all moved files
-echo "Fixing ownership and permissions for $USERNAME home directory..."
-chown -R "$USERNAME:$USERNAME" "/home/$USERNAME"
+# [FIXED FOR CHROOT] SSH folder inside chroot MUST be owned by root
+chown -R root:root "$SSH_DIR"
+chmod 755 "$SSH_DIR"
 
-# Set strict permissions for directories and files to satisfy SSH StrictModes
-chmod 750 "/home/$USERNAME"
-chmod 700 "$SSH_DIR"
-
+# Keys inside chroot must be readable by root, but strict enough for SSH
 if [ -f "$SSH_DIR/authorized_keys" ]; then
-  chmod 600 "$SSH_DIR/authorized_keys"
+  chmod 644 "$SSH_DIR/authorized_keys"
 fi
 if [ -f "$SSH_DIR/id_ed25519.pub" ]; then
   chmod 644 "$SSH_DIR/id_ed25519.pub"
 fi
 
-# 4. Configure /etc/ssh/sshd_config
+# 5. Create a dedicated writable directory named 'Download' for SFTP
+SFTP_DIR="/home/$USERNAME/Download"
+if [ ! -d "$SFTP_DIR" ]; then
+  echo "Creating writable 'Download' directory for SFTP..."
+  mkdir -p "$SFTP_DIR"
+fi
+chown "$USERNAME:$USERNAME" "$SFTP_DIR"
+chmod 755 "$SFTP_DIR"
+
+# 6. Configure /etc/ssh/sshd_config
 SSHD_CONFIG="/etc/ssh/sshd_config"
 
-# Check if configuration already exists to prevent duplication
-if grep -q "Match User $USERNAME" "$SSHD_CONFIG"; then
-  echo "Match User configuration for $USERNAME already exists in $SSHD_CONFIG. Skipping."
-else
-  echo "Adding security restrictions to the end of $SSHD_CONFIG..."
-  cat << 'EOF' >> "$SSHD_CONFIG"
+# Clean up any old configurations for this user to avoid conflicts
+sed -i '/# Security settings for SSH tunnel user/,/ForceCommand/d' "$SSHD_CONFIG"
+sed -i '/Match User sshtunneluser/,/ForceCommand/d' "$SSHD_CONFIG"
+sed -i '/# Security settings for SSH tunnel and SFTP user/,/ForceCommand/d' "$SSHD_CONFIG"
 
-# Security settings for SSH tunnel user
+echo "Adding security restrictions (Tunnel + SFTP) to $SSHD_CONFIG..."
+cat << 'EOF' >> "$SSHD_CONFIG"
+
+# Security settings for SSH tunnel and SFTP user
 Match User sshtunneluser
     AllowTcpForwarding yes
     X11Forwarding no
     PermitTTY no
-    ForceCommand echo "This account is for SSH tunneling only."
+    ChrootDirectory /home/sshtunneluser
+    ForceCommand internal-sftp
 EOF
-fi
 
-# 5. Validate configuration before restart
+# 7. Validate configuration before restart
 echo "Checking SSH configuration for syntax errors..."
 if ! sshd -t; then
   echo "Error: Syntax errors found in $SSHD_CONFIG! Please fix them manually."
   exit 1
 fi
 
-# 6. Restart SSH service
+# 8. Restart SSH service
 echo "Restarting SSH service..."
 if systemctl is-active --quiet sshd; then
   systemctl restart sshd
@@ -85,4 +97,5 @@ else
 fi
 
 echo "=== Configuration successfully completed! ==="
-echo "All done. The user, directories, and keys are perfectly secured."
+echo "User can now use both SSH Tunneling and SFTP."
+echo "NOTE: For file transfers via SFTP, use the 'Download' directory."
