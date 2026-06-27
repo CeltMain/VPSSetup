@@ -18,3 +18,9 @@ bash <(curl -Ls https://raw.githubusercontent.com/CeltMain/VPSSetup/refs/heads/m
 - Включение автообновления патчей безопасности
 ***
 - Завершающий этап с очисткой старых зависимостей
+
+
+### 🔗 SSH-Tunnel Setup
+```bash
+bash <(curl -Ls https://raw.githubusercontent.com/CeltMain/VPSSetup/refs/heads/main/tunnelsetup.sh)
+```
