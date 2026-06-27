@@ -252,33 +252,36 @@ resolvectl status
 
 # SSH && UFW
 sudo sed -i 's/IPV6=yes/IPV6=no/' /etc/default/ufw
-# UFW No Ping
+
+# UFW No Ping (Безопасный метод, не ломающий синтаксис при повторных запусках)
 echo
 echo "=== NoPing in UFW Setup ==="
-# Change ACCEPT to DROP for all rules INPUT and FORWARD in sections icmp
-sudo sed -i '/-A ufw-before-input -p icmp/s/ACCEPT/DROP/g' /etc/ufw/before.rules
-sudo sed -i '/-A ufw-before-forward -p icmp/s/ACCEPT/DROP/g' /etc/ufw/before.rules
-# Add new row for source-quench before rule forward
-if ! grep -q "source-quench -j DROP" /etc/ufw/before.rules; then
-    sudo sed -i '/-A ufw-before-input -p icmp --icmp-type echo-request -j DROP/a -A ufw-before-input -p icmp --icmp-type source-quench -j DROP' /etc/ufw/before.rules && echo "Done, row added"
+if [ -f /etc/ufw/before.rules ]; then
+    # Точечно отключаем только ответы на пинг (echo-request)
+    sudo sed -i 's/-A ufw-before-input -p icmp --icmp-type echo-request -j ACCEPT/-A ufw-before-input -p icmp --icmp-type echo-request -j DROP/g' /etc/ufw/before.rules
+    
+    # Добавляем защиту source-quench, если её еще нет
+    if ! grep -q "source-quench -j DROP" /etc/ufw/before.rules; then
+        sudo sed -i '/--icmp-type echo-request -j DROP/a -A ufw-before-input -p icmp --icmp-type source-quench -j DROP' /etc/ufw/before.rules
+    fi
 fi
-echo "Succes"
+echo "Success"
+
 # SSH-port configure
 echo
 echo "=== Configuring SSH Port ==="
-# Find row "#Port 22" and change on $SSH_PORT
 sudo sed -i "s/^#\?Port .*/Port $SSH_PORT/" /etc/ssh/sshd_config
 sudo rm -f /etc/ssh/sshd_config.d/*.conf || true
 sudo mkdir -p /run/sshd
 sudo sshd -t
 sudo systemctl daemon-reload
 sudo systemctl restart ssh.socket ssh.service || sudo systemctl restart ssh
-#
-if [ "$CURRENT_PORT" -ne "$SSH_PORT" ]; then
-    sudo ufw delete allow $CURRENT_PORT/tcp || true
-fi
-# ALWAYS open $SSH_PORT and 443
-sudo ufw allow $SSH_PORT/tcp
+echo "Cleaning up old firewall rules..."
+OLD_SSH_RULES=$(sudo ufw status numbered | grep "SSH Custom Port" | awk -F'[' '{print $2}' | awk -F']' '{print $1}' | sort -rn || true)
+for num in $OLD_SSH_RULES; do
+    sudo ufw --force delete "$num"
+done
+sudo ufw allow $SSH_PORT/tcp comment 'SSH Custom Port'
 sudo ufw allow 443/tcp
 sudo ufw --force enable && sudo ufw status numbered || true
 
