@@ -252,21 +252,20 @@ resolvectl status
 
 # SSH && UFW
 sudo sed -i 's/IPV6=yes/IPV6=no/' /etc/default/ufw
-
-# UFW No Ping (Безопасный метод, не ломающий синтаксис при повторных запусках)
+# UFW No Ping
 echo
 echo "=== NoPing in UFW Setup ==="
 if [ -f /etc/ufw/before.rules ]; then
-    # Точечно отключаем только ответы на пинг (echo-request)
-    sudo sed -i 's/-A ufw-before-input -p icmp --icmp-type echo-request -j ACCEPT/-A ufw-before-input -p icmp --icmp-type echo-request -j DROP/g' /etc/ufw/before.rules
-    
-    # Добавляем защиту source-quench, если её еще нет
+    sudo sed -i '/-A ufw-before-input -p icmp.*-j ACCEPT/s/ACCEPT/DROP/g' /etc/ufw/before.rules
+    sudo sed -i '/-A ufw-before-forward -p icmp.*-j ACCEPT/s/ACCEPT/DROP/g' /etc/ufw/before.rules
     if ! grep -q "source-quench -j DROP" /etc/ufw/before.rules; then
-        sudo sed -i '/--icmp-type echo-request -j DROP/a -A ufw-before-input -p icmp --icmp-type source-quench -j DROP' /etc/ufw/before.rules
+        sudo sed -i '/-A ufw-before-input -p icmp --icmp-type echo-request -j DROP/a -A ufw-before-input -p icmp --icmp-type source-quench -j DROP' /etc/ufw/before.rules
+        echo "Done, source-quench row added"
+    else
+        echo "Source-quench rule already exists, skipping."
     fi
 fi
 echo "Success"
-
 # SSH-port configure
 echo
 echo "=== Configuring SSH Port ==="
