@@ -33,11 +33,14 @@ else
   mkdir -p "$SSH_DIR"
 fi
 
-# Set baseline permissions for the directory
-chown -R "$USERNAME:$USERNAME" "$SSH_DIR"
+# [FIXED] Force correct ownership for the entire home directory and all moved files
+echo "Fixing ownership and permissions for $USERNAME home directory..."
+chown -R "$USERNAME:$USERNAME" "/home/$USERNAME"
+
+# Set strict permissions for directories and files to satisfy SSH StrictModes
+chmod 750 "/home/$USERNAME"
 chmod 700 "$SSH_DIR"
 
-# [ADDED] Automatically fix permissions for key files if they exist
 if [ -f "$SSH_DIR/authorized_keys" ]; then
   chmod 600 "$SSH_DIR/authorized_keys"
 fi
@@ -82,4 +85,4 @@ else
 fi
 
 echo "=== Configuration successfully completed! ==="
-echo "All done. The user and directory are perfectly secured."
+echo "All done. The user, directories, and keys are perfectly secured."
