@@ -10,6 +10,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/CeltMain/VPSSetup/refs/heads/m
 ```
 
 <div align="center">
+
 ### Базовая, минимальная автоматизация настройки свежей VPS.
 
 </div>
