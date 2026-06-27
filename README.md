@@ -2,10 +2,12 @@
   <img width="280" height="280" alt="IMG_20250403_225327_985 (3)" src="https://github.com/user-attachments/assets/9c7ff9b4-0ef0-452c-9600-1d5fff07a83d" />
   
 # Что делает скрипт?
+</div>
 ### 🔗 VPS Setup
 ```bash
 bash <(curl -Ls https://raw.githubusercontent.com/CeltMain/VPSSetup/refs/heads/main/vpssetup.sh)
 ```
+<div align="center">
 ### Базовая, минимальная автоматизация настройки свежей VPS.
 </div>
 
