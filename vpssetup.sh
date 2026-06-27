@@ -2,6 +2,11 @@
 
 # Close if any error
 set -e
+# Check root privileges
+if [ "$EUID" -ne 0 ]; then
+  echo "Error: This script must be run as root or via sudo!"
+  exit 1
+fi
 # Update
 echo
 echo "=== Updating package lists and upgrading system ==="
