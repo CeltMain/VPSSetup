@@ -5,7 +5,6 @@
 </div>
 
 ### 🔗 VPS Setup
-
 ```bash
 bash <(curl -Ls https://raw.githubusercontent.com/CeltMain/VPSSetup/refs/heads/main/vpssetup.sh)
 ```
