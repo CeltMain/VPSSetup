@@ -28,3 +28,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/CeltMain/VPSSetup/refs/heads/m
 ```bash
 bash <(curl -Ls https://raw.githubusercontent.com/CeltMain/VPSSetup/refs/heads/main/tunnelsetup.sh)
 ```
+
+<div align="center">
+### Автоматизация создания изолированного пользователя для SSH-туннелей.
+</div>
