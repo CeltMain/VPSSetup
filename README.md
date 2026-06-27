@@ -21,13 +21,12 @@ bash <(curl -Ls https://raw.githubusercontent.com/CeltMain/VPSSetup/refs/heads/m
 ***
 - Завершающий этап с очисткой старых зависимостей
 
+<div align="center">
+
+### Автоматизация создания изолированного пользователя для SSH-туннелей.
+</div>
 
 ### 🔗 SSH-Tunnel Setup
 ```bash
 bash <(curl -Ls https://raw.githubusercontent.com/CeltMain/VPSSetup/refs/heads/main/tunnelsetup.sh)
 ```
-
-<div align="center">
-
-### Автоматизация создания изолированного пользователя для SSH-туннелей.
-</div>
