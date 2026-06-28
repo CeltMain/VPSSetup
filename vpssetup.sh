@@ -185,52 +185,40 @@ if [ "$ENABLE_DOT" = true ]; then
     while true; do
         echo
         echo "Select DNS provider:"
-        echo "  1) Quad9 (Privacy) [Default]"
-        echo "  2) Cloudflare (Speed)"
+        echo "  1) Quad9 (Privacy)"
+        echo "  2) Cloudflare (Speed) [Default]"
         echo "  3) Google (Stability)"
-        echo "  4) Yandex (Good for RU segment, Basic filtering)"
-        echo "  5) Google + Cloudflare (Max Stability & Speed)"
-        echo "  6) Quad9 + Cloudflare (Max Privacy & Speed)"
-        read -p "Your choice (1-6): " DNS_CHOICE
+        echo "  4) Yandex (For RU segment, Basic filtering)"
+        read -p "Your choice (1-4): " DNS_CHOICE
         if [ -z "$DNS_CHOICE" ]; then
-            DNS_CHOICE="1"
-            echo -e "\e[1A\e[KYour choice (1-6): 1"
+            DNS_CHOICE="2"
+            echo -e "\e[1A\e[KYour choice (1-4): 2"
         fi
         DNSSEC_POLICY="yes"
         case "$DNS_CHOICE" in
             1)
-                DNS_SERVERS="9.9.9.9 149.112.112.112"
+                DNS_SERVERS="9.9.9.9#dns.quad9.net 149.112.112.112#dns.quad9.net"
                 PROVIDER_NAME="Quad9"
                 break
                 ;;
             2)
-                DNS_SERVERS="1.1.1.1 1.0.0.1"
+                DNS_SERVERS="1.1.1.1#cloudflare-dns.com 1.0.0.1#cloudflare-dns.com"
                 PROVIDER_NAME="Cloudflare"
                 break
                 ;;
             3)
-                DNS_SERVERS="8.8.8.8 8.8.4.4"
+                DNS_SERVERS="8.8.8.8#dns.google 8.8.4.4#dns.google"
                 PROVIDER_NAME="Google"
                 break
                 ;;
             4)
-                DNS_SERVERS="77.88.8.8 77.88.8.1"
+                DNS_SERVERS="77.88.8.8#common.dns.yandex.ru 77.88.8.1#common.dns.yandex.ru"
                 PROVIDER_NAME="Yandex"
                 DNSSEC_POLICY="allow-downgrade"
                 break
                 ;;
-            5)
-                DNS_SERVERS="8.8.8.8 1.1.1.1 8.8.4.4 1.0.0.1"
-                PROVIDER_NAME="Google + Cloudflare"
-                break
-                ;;
-            6)
-                DNS_SERVERS="9.9.9.9 1.1.1.1 149.112.112.112 1.0.0.1"
-                PROVIDER_NAME="Quad9 + Cloudflare"
-                break
-                ;;
             *)
-                echo "Error: Invalid choice. Please enter a number between 1 and 6."
+                echo "Error: Invalid choice. Please enter a number between 1 and 4."
                 ;;
         esac
     done
@@ -253,6 +241,7 @@ EOT
         sudo resolvectl domain "$NET_INT" ""
     fi
 fi
+echo
 resolvectl status
 
 # SSH && UFW
