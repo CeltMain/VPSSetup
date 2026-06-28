@@ -12,8 +12,8 @@ bash <(curl -Ls https://raw.githubusercontent.com/CeltMain/VPSSetup/refs/heads/m
 ```
 
 - Позволяет установить порт SSH на выбор
-- Позволяет создать настраиваемый файл подкачки [Default: 2]
-- Настройка DNS over TLS [Default: Quad9]
+- Позволяет создать настраиваемый файл подкачки [Default: 2GB]
+- Настройка DNS over TLS [Default: Cloudflare]
 - Конфигурация и включение UFW
     + открытие 2 портов: выбранный SSH и 443/tcp (остальное без изменений)
     + отключение создания правил для IPv6
