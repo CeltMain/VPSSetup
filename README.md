@@ -15,7 +15,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/CeltMain/VPSSetup/refs/heads/m
 
 <div align="center">
 
-# 🛠 Основные возможности автоматизации:
+### 🛠 Основные возможности автоматизации:
 
 </div>
 
@@ -31,7 +31,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/CeltMain/VPSSetup/refs/heads/m
 
 <div align="center">
 
-# 🔒 Архитектура безопасности и изоляции:
+### 🔒 Архитектура безопасности и изоляции:
 
 </div>
 
@@ -47,7 +47,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/CeltMain/VPSSetup/refs/heads/m
 
 <div align="center">
 
-  # 🧹 Завершающий этап выполнения
+  ### 🧹 Завершающий этап выполнения
 
 </div>
 
