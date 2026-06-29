@@ -30,7 +30,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/CeltMain/VPSSetup/refs/heads/m
 
 ### 🔗 SSH-Tunnel Setup
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/CeltMain/VPSSetup/refs/heads/main/tunnelsetup.sh)
+кек
 ```
 
 - Автоматически создает пользователя `sshtunneluser` с заблокированным терминалом (без доступа к консоли сервера)
