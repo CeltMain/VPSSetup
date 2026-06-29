@@ -226,11 +226,7 @@ while true; do
         echo -e "Error: Invalid input. Please enter 'y' or 'n'\n"
     fi
 done
-if [ "$DNS_CHOICE" = "4" ]; then
-    DNSSEC_POLICY="allow-downgrade"
-else
-    DNSSEC_POLICY="yes"
-fi
+DNSSEC_POLICY="yes"
 echo "Configuring $PROVIDER_NAME (DNS over TLS: $ENABLE_DOT, DNSSEC: $DNSSEC_POLICY)..."
 rm -f /etc/systemd/resolved.conf.d/*.conf || true
 mkdir -p /etc/systemd/resolved.conf.d
