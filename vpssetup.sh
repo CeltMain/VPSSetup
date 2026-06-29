@@ -285,10 +285,10 @@ done
 echo
 echo "=== NoPing in UFW Setup ==="
 if [ -f /etc/ufw/before.rules ]; then
-    sed -i '/-A ufw-before-input -p icmp.*-j ACCEPT/s/ACCEPT/DROP/g' /etc/ufw/before.rules
-    sed -i '/-A ufw-before-forward -p icmp.*-j ACCEPT/s/ACCEPT/DROP/g' /etc/ufw/before.rules
+    sed -i 's/-A ufw-before-input -p icmp --icmp-type echo-request -j ACCEPT/-A ufw-before-input -p icmp --icmp-type echo-request -j DROP/g' /etc/ufw/before.rules
+    sed -i 's/-A ufw-before-forward -p icmp --icmp-type echo-request -j ACCEPT/-A ufw-before-forward -p icmp --icmp-type echo-request -j DROP/g' /etc/ufw/before.rules
     if ! grep -Fq "source-quench -j DROP" /etc/ufw/before.rules; then
-        sed -i '/-A ufw-before-input -p icmp --icmp-type echo-request -j DROP/a -A ufw-before-input -p icmp --icmp-type source-quench -j DROP' /etc/ufw/before.rules
+        sed -i '/--icmp-type echo-request -j DROP/a -A ufw-before-input -p icmp --icmp-type source-quench -j DROP' /etc/ufw/before.rules
         echo "Done, source-quench row added"
     else
         echo "Source-quench rule already exists, skipping."
