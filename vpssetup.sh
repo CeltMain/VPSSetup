@@ -240,8 +240,14 @@ EOT
 if systemctl list-unit-files | grep -q "systemd-resolved"; then
     systemctl daemon-reload
     systemctl restart systemd-resolved || true
-    if [ -f /run/systemd/resolve/stub-resolv.conf ]; then
-        ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+    if [ "$ENABLE_DOT" = "yes" ]; then
+        if [ -f /run/systemd/resolve/stub-resolv.conf ]; then
+            ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+        fi
+    else
+        if [ -f /run/systemd/resolve/resolv.conf ]; then
+            ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+        fi
     fi
     NET_INT=$(ip route | grep default | awk '{print $5}')
     if [ -n "$NET_INT" ]; then
