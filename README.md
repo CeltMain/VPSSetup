@@ -11,8 +11,6 @@
 bash <(curl -Ls https://raw.githubusercontent.com/CeltMain/VPSSetup/refs/heads/main/vpssetup.sh)
 ```
 
----
-
 <div align="center">
 
 ### 🛠 Основные возможности автоматизации:
@@ -27,8 +25,6 @@ bash <(curl -Ls https://raw.githubusercontent.com/CeltMain/VPSSetup/refs/heads/m
 * **Скрытый режим (NoPing)**: Полное отключение ответов на входящие ICMP-запросы (пинг) для защиты VPS от сканирования.
 * **Патчи безопасности**: Включение системной службы автообновления и бесшумной установки критических обновлений ОС.
 
----
-
 <div align="center">
 
 ### 🔒 Архитектура безопасности и изоляции:
@@ -42,8 +38,6 @@ bash <(curl -Ls https://raw.githubusercontent.com/CeltMain/VPSSetup/refs/heads/m
 * **Встроенный SFTP**: Конфигурирует безопасный изолированный модуль ядра `internal-sftp` с заблокированным терминалом.
 * **Область записи**: Автоматически размечает доступную для записи папку `Download` внутри закрытого Chroot-окружения.
 * **Валидация синтаксиса**: Выполняет принудительную проверку конфигурации демона SSH перед рестартом во избежание сбоев сети.
-
----
 
 <div align="center">
 
