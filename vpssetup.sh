@@ -326,12 +326,15 @@ else
     echo "Disabling IPv6 in UFW automatically to prevent system errors..."
     sed -i 's/IPV6=yes/IPV6=no/' /etc/default/ufw
 fi
+
 # UFW No Ping
 echo
 echo "=== NoPing in UFW Setup ==="
+# Точечно отключаем пинг для IPv4
 if [ -f /etc/ufw/before.rules ]; then
     sed -i 's/-A ufw-before-input -p icmp --icmp-type echo-request -j ACCEPT/-A ufw-before-input -p icmp --icmp-type echo-request -j DROP/g' /etc/ufw/before.rules
     sed -i 's/-A ufw-before-forward -p icmp --icmp-type echo-request -j ACCEPT/-A ufw-before-forward -p icmp --icmp-type echo-request -j DROP/g' /etc/ufw/before.rules
+    
     if ! grep -Fq "source-quench -j DROP" /etc/ufw/before.rules; then
         sed -i '/--icmp-type echo-request -j DROP/a -A ufw-before-input -p icmp --icmp-type source-quench -j DROP' /etc/ufw/before.rules
         echo "Done, source-quench row added"
@@ -339,7 +342,14 @@ if [ -f /etc/ufw/before.rules ]; then
         echo "Source-quench rule already exists, skipping."
     fi
 fi
+
+# Точечно отключаем пинг для IPv6 (если он есть в системе), чтобы сервер не пинговался по ipv6-адресу
+if [ -f /etc/ufw/before6.rules ]; then
+    sed -i 's/-A ufw-before-input -p icmpv6 --icmp-type echo-request -j ACCEPT/-A ufw-before-input -p icmpv6 --icmp-type echo-request -j DROP/g' /etc/ufw/before6.rules
+    sed -i 's/-A ufw-before-forward -p icmpv6 --icmp-type echo-request -j ACCEPT/-A ufw-before-forward -p icmpv6 --icmp-type echo-request -j DROP/g' /etc/ufw/before6.rules
+fi
 echo "Success"
+
 # SSH-port configure
 echo
 echo "=== Configuring SSH Port ==="
@@ -360,28 +370,12 @@ sudo ufw --force enable >/dev/null 2>&1 || true
 echo -e "\n=== Final Firewall Status ==="
 ufw status verbose | grep -E "Status|To|--" || ufw status
 
-# Auto Security Updates
+# Auto Security Updates (Оставлен один чистый блок)
 echo
 echo "=== Enabling Auto Security Updates Setup ==="
 echo "Checking for background package managers..."
 while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do 
     echo -n "." 
-    sleep 3
-done
-echo " Package manager is free. Proceeding..."
-apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" install unattended-upgrades -y
-tee /etc/apt/apt.conf.d/20auto-upgrades > /dev/null <<EOT
-APT::Periodic::Update-Package-Lists "1";
-APT::Periodic::Unattended-Upgrade "1";
-EOT
-echo "Done"
-
-# Auto Security Updates
-echo
-echo "=== Enabling Auto Security Updates Setup ==="
-echo "Checking for background package managers..."
-while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
-    echo -n "."
     sleep 3
 done
 echo " Package manager is free. Proceeding..."
