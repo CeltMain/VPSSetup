@@ -11,7 +11,7 @@ sudo rm -f /etc/systemd/resolved.conf.d/dot-custom.conf
 echo "[2/4] Restoring standard resolv.conf symlink..."
 sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 
-# 3. Clean and fix Netplan safely using system tools and Python JSON
+# 3. Clean and fix Netplan safely using Python
 echo "[3/4] Updating Netplan configuration safely..."
 NETPLAN_FILE=$(ls /etc/netplan/*.yaml | head -n 1)
 
@@ -21,27 +21,16 @@ if [ -n "$NETPLAN_FILE" ]; then
     # Backup original file just in case
     sudo cp "$NETPLAN_FILE" "${NETPLAN_FILE}.bak"
     
-    # Export current config to JSON using netplan's native tool safely
-    if netplan get all --format json >/dev/null 2>&1; then
-        export CURRENT_JSON=$(netplan get all --format json)
-    else
-        export CURRENT_JSON="USE_YAML"
-    fi
-
     export NETPLAN_FILE_PATH="$NETPLAN_FILE"
 
-    # Modify network data safely using environment variables
+    # Modify network data safely using standard PyYAML
     sudo -E python3 -c "
-import json, sys, os, yaml
+import os, yaml
 
 netplan_file = os.environ['NETPLAN_FILE_PATH']
-current_json = os.environ['CURRENT_JSON']
 
-if current_json == 'USE_YAML':
-    with open(netplan_file, 'r') as f:
-        data = yaml.safe_load(f)
-else:
-    data = json.loads(current_json)
+with open(netplan_file, 'r') as f:
+    data = yaml.safe_load(f) or {}
 
 if 'network' in data and 'ethernets' in data['network']:
     for iface in data['network']['ethernets'].values():
@@ -56,7 +45,7 @@ if 'network' in data and 'ethernets' in data['network']:
             if not any(r.get('to') == 'default' for r in iface['routes']):
                 iface['routes'].append({'to': 'default', 'via': gw})
 
-# Write configuration back as valid YAML format using system's standard yaml processor
+# Write configuration back as valid YAML format
 with open(netplan_file, 'w') as f:
     yaml.dump(data, f, default_flow_style=False)
 "
