@@ -3,68 +3,54 @@ set -e
 
 echo "=== DNS Configuration Restore Script ==="
 
-# 1. Remove custom systemd-resolved config
+# 1. Удаление кастомной конфигурации systemd-resolved
 echo "[1/4] Removing custom script configurations..."
 sudo rm -f /etc/systemd/resolved.conf.d/dot-custom.conf
 
-# 2. Restore standard resolv.conf symlink
+# 2. Восстановление стандартной символической ссылки resolv.conf
 echo "[2/4] Restoring standard resolv.conf symlink..."
 sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 
-# 3. Clean and fix Netplan safely using Python
-echo "[3/4] Updating Netplan configuration safely..."
+# 3. Полная перезапись файла Netplan на чистый и современный формат
+echo "[3/4] Recreating Netplan configuration safely..."
 NETPLAN_FILE=$(ls /etc/netplan/*.yaml | head -n 1)
 
 if [ -n "$NETPLAN_FILE" ]; then
-    echo "Found config file: $NETPLAN_FILE"
+    echo "Updating file: $NETPLAN_FILE"
     
-    # Backup original file just in case
+    # Делаем бэкап старого файла
     sudo cp "$NETPLAN_FILE" "${NETPLAN_FILE}.bak"
     
-    export NETPLAN_FILE_PATH="$NETPLAN_FILE"
-
-    # Modify network data safely using standard PyYAML
-    sudo -E python3 -c "
-import os, yaml
-
-netplan_file = os.environ['NETPLAN_FILE_PATH']
-
-with open(netplan_file, 'r') as f:
-    data = yaml.safe_load(f) or {}
-
-if 'network' in data and 'ethernets' in data['network']:
-    for iface in data['network']['ethernets'].values():
-        # Update DNS to Cloudflare
-        if 'nameservers' in iface:
-            iface['nameservers']['addresses'] = ['1.1.1.1', '1.0.0.1']
-        # Fix deprecated gateway4 warning
-        if 'gateway4' in iface and iface['gateway4']:
-            gw = iface.pop('gateway4')
-            if 'routes' not in iface:
-                iface['routes'] = []
-            if not any(r.get('to') == 'default' for r in iface['routes']):
-                iface['routes'].append({'to': 'default', 'via': gw})
-
-# Write configuration back as valid YAML format
-with open(netplan_file, 'w') as f:
-    yaml.dump(data, f, default_flow_style=False)
-"
+    # Записываем чистый, идеальный YAML формат без предупреждений gateway4
+    sudo tee "$NETPLAN_FILE" > /dev/null <<EOT
+network:
+  version: 2
+  ethernets:
+    eth0:
+      match:
+        macaddress: "bc:24:11:d6:d0:3b"
+      addresses:
+      - "89.125.121.233/24"
+      nameservers:
+        addresses:
+        - 1.1.1.1
+        - 1.0.0.1
+      set-name: "eth0"
+      routes:
+      - to: "default"
+        via: "89.125.121.1"
+EOT
 else
     echo "Warning: No Netplan files found."
 fi
 
-# 4. Apply network configuration
+# 4. Применение настроек сети
 echo "[4/4] Applying network settings..."
 sudo netplan apply
 sudo systemctl daemon-reload
 sudo systemctl restart systemd-networkd
 sudo systemctl restart systemd-resolved
 
-# Final Verification
+# Проверка итогового статуса
 echo -e "\n=== Verification ==="
-MAIN_INT=$(ip route | grep default | awk '{print $5}' | head -n 1)
-if [ -n "$MAIN_INT" ]; then
-    resolvectl status "$MAIN_INT"
-else
-    resolvectl status
-fi
+resolvectl status eth0 2>/dev/null || resolvectl status
