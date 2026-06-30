@@ -335,8 +335,13 @@ if [ -f /etc/ufw/before.rules ]; then
     sed -i 's/-A ufw-before-input -p icmp --icmp-type echo-request -j ACCEPT/-A ufw-before-input -p icmp --icmp-type echo-request -j DROP/g' /etc/ufw/before.rules
     sed -i 's/-A ufw-before-forward -p icmp --icmp-type echo-request -j ACCEPT/-A ufw-before-forward -p icmp --icmp-type echo-request -j DROP/g' /etc/ufw/before.rules
     
+    # ФИКС: Строка добавится строго один раз и только если её физически нет в файле
     if ! grep -Fq "source-quench -j DROP" /etc/ufw/before.rules; then
-        sed -i '/--icmp-type echo-request -j DROP/a -A ufw-before-input -p icmp --icmp-type source-quench -j DROP' /etc/ufw/before.rules
+        sed -i '/--icmp-type echo-request -j DROP/!b;n;i -A ufw-before-input -p icmp --icmp-type source-quench -j DROP' /etc/ufw/before.rules
+        # Если вставка через sed не сработала (например, на старых версиях), делаем надежный fallback
+        if ! grep -Fq "source-quench -j DROP" /etc/ufw/before.rules; then
+            sed -i '/-A ufw-before-input -p icmp --icmp-type echo-request -j DROP/a -A ufw-before-input -p icmp --icmp-type source-quench -j DROP' /etc/ufw/before.rules
+        fi
         echo "Done, source-quench row added"
     else
         echo "Source-quench rule already exists, skipping."
