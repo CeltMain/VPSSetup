@@ -167,35 +167,35 @@ echo
 echo "=== DNS Setup ==="
 while true; do
     echo "Select DNS provider:"
-    echo "  1) Quad9 (Privacy)"
-    echo "  2) Cloudflare (Speed) [Default]"
-    echo "  3) Google (Stability)"
+    echo "  1) Cloudflare (Speed) [Default]"
+    echo "  2) Google (Stability)"
+    echo "  3) Quad9 (Privacy)"
     echo "  4) Yandex (For RU segment, Basic filtering)"
     read -p "Your choice (1-4): " DNS_CHOICE
     if [ -z "$DNS_CHOICE" ]; then
-        DNS_CHOICE="2"
-        echo -e "\e[1A\e[KYour choice (1-4): 2"
+        DNS_CHOICE="1"
+        echo -e "\e[1A\e[KYour choice (1-4): 1"
     fi
     case "$DNS_CHOICE" in
         1)
-            DNS_IPS="9.9.9.9 149.112.112.112"
-            DNS_DOT_SERVERS="9.9.9.9#dns.quad9.net 149.112.112.112#dns.quad9.net"
-            PROVIDER_NAME="Quad9"
-            TEST_DOMAIN="dns.quad9.net"
-            break
-            ;;
-        2)
             DNS_IPS="1.1.1.1 1.0.0.1"
             DNS_DOT_SERVERS="1.1.1.1#cloudflare-dns.com 1.0.0.1#cloudflare-dns.com"
             PROVIDER_NAME="Cloudflare"
             TEST_DOMAIN="cloudflare.com"
             break
             ;;
-        3)
+        2)
             DNS_IPS="8.8.8.8 8.8.4.4"
             DNS_DOT_SERVERS="8.8.8.8#dns.google 8.8.4.4#dns.google"
             PROVIDER_NAME="Google"
             TEST_DOMAIN="dns.google"
+            break
+            ;;
+        3)
+            DNS_IPS="9.9.9.9 149.112.112.112"
+            DNS_DOT_SERVERS="9.9.9.9#dns.quad9.net 149.112.112.112#dns.quad9.net"
+            PROVIDER_NAME="Quad9"
+            TEST_DOMAIN="dns.quad9.net"
             break
             ;;
         4)
@@ -221,7 +221,7 @@ while true; do
     if [ "${DOT_INPUT,,}" = "y" ] || [ "${DOT_INPUT,,}" = "yes" ]; then
         ENABLE_DOT="yes"
         DNS_FINAL_SERVERS="$DNS_DOT_SERVERS"
-        DNSSEC_POLICY="allow-downgrade" # Безопасный режим DNSSEC, не роняющий старые сайты
+        DNSSEC_POLICY="no"
         break
     elif [ "${DOT_INPUT,,}" = "n" ] || [ "${DOT_INPUT,,}" = "no" ]; then
         ENABLE_DOT="no"
@@ -248,7 +248,7 @@ EOT
     systemctl restart systemd-resolved || true
     if [ -f /run/systemd/resolve/stub-resolv.conf ]; then
         ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
-    fi
+    fi  
     resolvectl flush-caches >/dev/null 2>&1 || true
     echo -e "\n=== Verification ==="
     NET_INT=$(ip route | grep default | awk '{print $5}' | head -n 1)
@@ -259,8 +259,8 @@ EOT
     fi
     echo -e "\n=== DNS Speed & Connectivity Test ==="
     if command -v dig >/dev/null 2>&1; then
-        echo "Measuring DNS response time to $TEST_DOMAIN..."
-        SPEED_TEST=$(dig "$TEST_DOMAIN" | grep "Query time" || true)
+        echo "Measuring DNS response time to $TEST_DOMAIN via secure resolver..."
+        SPEED_TEST=$(dig @127.0.0.53 "$TEST_DOMAIN" | grep "Query time" || true)
         if [ -n "$SPEED_TEST" ]; then
             echo "Result: $SPEED_TEST"
         else
@@ -278,7 +278,7 @@ else
     echo "Warning: systemd-resolved is not active. Configuring fallback via classic /etc/resolv.conf..."
     if [ "$ENABLE_DOT" = "yes" ]; then
         echo "Notice: DNS over TLS requires systemd-resolved. Setting up standard encrypted fallback instead."
-    fi 
+    fi
     sudo rm -f /etc/resolv.conf
     for ip in $DNS_IPS; do
         echo "nameserver $ip" | sudo tee -a /etc/resolv.conf > /dev/null
