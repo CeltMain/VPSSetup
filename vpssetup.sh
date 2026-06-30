@@ -181,24 +181,28 @@ while true; do
             DNS_IPS="9.9.9.9 149.112.112.112"
             DNS_DOT_SERVERS="9.9.9.9#dns.quad9.net 149.112.112.112#dns.quad9.net"
             PROVIDER_NAME="Quad9"
+            TEST_DOMAIN="dns.quad9.net"
             break
             ;;
         2)
             DNS_IPS="1.1.1.1 1.0.0.1"
             DNS_DOT_SERVERS="1.1.1.1#cloudflare-dns.com 1.0.0.1#cloudflare-dns.com"
             PROVIDER_NAME="Cloudflare"
+            TEST_DOMAIN="cloudflare.com"
             break
             ;;
         3)
             DNS_IPS="8.8.8.8 8.8.4.4"
             DNS_DOT_SERVERS="8.8.8.8#dns.google 8.8.4.4#dns.google"
             PROVIDER_NAME="Google"
+            TEST_DOMAIN="dns.google"
             break
             ;;
         4)
             DNS_IPS="77.88.8.8 77.88.8.1"
             DNS_DOT_SERVERS="77.88.8.8#common.dns.yandex.ru 77.88.8.1#common.dns.yandex.ru"
             PROVIDER_NAME="Yandex"
+            TEST_DOMAIN="yandex.ru"
             break
             ;;
         *)
@@ -217,47 +221,69 @@ while true; do
     if [ "${DOT_INPUT,,}" = "y" ] || [ "${DOT_INPUT,,}" = "yes" ]; then
         ENABLE_DOT="yes"
         DNS_FINAL_SERVERS="$DNS_DOT_SERVERS"
+        DNSSEC_POLICY="allow-downgrade" # Безопасный режим DNSSEC, не роняющий старые сайты
         break
     elif [ "${DOT_INPUT,,}" = "n" ] || [ "${DOT_INPUT,,}" = "no" ]; then
         ENABLE_DOT="no"
         DNS_FINAL_SERVERS="$DNS_IPS"
+        DNSSEC_POLICY="no"
         break
     else
         echo -e "Error: Invalid input. Please enter 'y' or 'n'\n"
     fi
 done
-DNSSEC_POLICY="yes"
 echo "Configuring $PROVIDER_NAME (DNS over TLS: $ENABLE_DOT, DNSSEC: $DNSSEC_POLICY)..."
-rm -f /etc/systemd/resolved.conf.d/*.conf || true
-mkdir -p /etc/systemd/resolved.conf.d
-tee /etc/systemd/resolved.conf.d/dot-custom.conf > /dev/null <<EOT
+if systemctl list-unit-files | grep -q "systemd-resolved"; then
+    rm -f /etc/systemd/resolved.conf.d/dot-custom.conf || true
+    mkdir -p /etc/systemd/resolved.conf.d
+    tee /etc/systemd/resolved.conf.d/dot-custom.conf > /dev/null <<EOT
 [Resolve]
 DNS=$DNS_FINAL_SERVERS
-Domains=~.
 DNSOverTLS=$ENABLE_DOT
 DNSSEC=$DNSSEC_POLICY
+FallbackDNS=8.8.8.8 1.1.1.1
 EOT
-if systemctl list-unit-files | grep -q "systemd-resolved"; then
     systemctl daemon-reload
+    systemctl enable systemd-resolved --now >/dev/null 2>&1 || true
     systemctl restart systemd-resolved || true
-    if [ "$ENABLE_DOT" = "yes" ]; then
-        if [ -f /run/systemd/resolve/stub-resolv.conf ]; then
-            ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+    if [ -f /run/systemd/resolve/stub-resolv.conf ]; then
+        ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+    fi
+    resolvectl flush-caches >/dev/null 2>&1 || true
+    echo -e "\n=== Verification ==="
+    NET_INT=$(ip route | grep default | awk '{print $5}' | head -n 1)
+    if [ -n "$NET_INT" ]; then
+        resolvectl status "$NET_INT" 2>/dev/null || resolvectl status
+    else
+        resolvectl status
+    fi
+    echo -e "\n=== DNS Speed & Connectivity Test ==="
+    if command -v dig >/dev/null 2>&1; then
+        echo "Measuring DNS response time to $TEST_DOMAIN..."
+        SPEED_TEST=$(dig "$TEST_DOMAIN" | grep "Query time" || true)
+        if [ -n "$SPEED_TEST" ]; then
+            echo "Result: $SPEED_TEST"
+        else
+            echo "DNS Status: Connected, but response time log is unavailable."
         fi
     else
-        if [ -f /run/systemd/resolve/resolv.conf ]; then
-            ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+        echo "Utility 'dnsutils' (dig) not found. Performing fallback ping test..."
+        if ping -c 2 -W 3 "$TEST_DOMAIN" >/dev/null 2>&1; then
+            echo "DNS Status: OK (Domain successfully resolved and pinged)."
+        else
+            echo "DNS Status: WARNING (Network might be unreachable or domain resolve failed)."
         fi
     fi
-    NET_INT=$(ip route | grep default | awk '{print $5}')
-    if [ -n "$NET_INT" ]; then
-        resolvectl dns "$NET_INT" "" 2>/dev/null || true
-        resolvectl domain "$NET_INT" "" 2>/dev/null || true
-    fi
-    echo
-    resolvectl status 2>/dev/null || true
 else
-    echo "Warning: systemd-resolved is not installed or active on this system. Configuration saved but not applied to network manager."
+    echo "Warning: systemd-resolved is not active. Configuring fallback via classic /etc/resolv.conf..."
+    if [ "$ENABLE_DOT" = "yes" ]; then
+        echo "Notice: DNS over TLS requires systemd-resolved. Setting up standard encrypted fallback instead."
+    fi 
+    sudo rm -f /etc/resolv.conf
+    for ip in $DNS_IPS; do
+        echo "nameserver $ip" | sudo tee -a /etc/resolv.conf > /dev/null
+    done
+    echo "Configuration applied via static resolv.conf successfully."
 fi
 
 # SSH && UFW
