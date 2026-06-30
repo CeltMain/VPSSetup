@@ -239,7 +239,6 @@ if systemctl list-unit-files | grep -q "systemd-resolved"; then
     tee /etc/systemd/resolved.conf.d/dot-custom.conf > /dev/null <<EOT
 [Resolve]
 DNS=$DNS_FINAL_SERVERS
-Domains=~.
 DNSOverTLS=$ENABLE_DOT
 DNSSEC=$DNSSEC_POLICY
 FallbackDNS=8.8.8.8 1.1.1.1
