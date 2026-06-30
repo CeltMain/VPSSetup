@@ -11,34 +11,48 @@ sudo rm -f /etc/systemd/resolved.conf.d/dot-custom.conf
 echo "[2/4] Restoring standard resolv.conf symlink..."
 sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 
-# 3. Полная перезапись файла Netplan на чистый и современный формат
-echo "[3/4] Recreating Netplan configuration safely..."
+# 3. Сбор сетевых данных текущей VPS для универсальности
+echo "[3/4] Gathering network facts and updating Netplan..."
+
+# Находим основной сетевой интерфейс (например, eth0 или ens18)
+IFACE=$(ip route | grep default | awk '{print $5}' | head -n 1)
+
+if [ -z "$IFACE" ]; then
+    echo "Error: Default network interface not found!"
+    exit 1
+fi
+
+# Собираем текущие "заводские" параметры сети
+IP_ADDR=$(ip addr show "$IFACE" | grep "inet " | awk '{print $2}' | head -n 1)
+GATEWAY=$(ip route | grep default | awk '{print $3}' | head -n 1)
+MAC_ADDR=$(ip link show "$IFACE" | grep "link/ether" | awk '{print $2}' | head -n 1)
+
 NETPLAN_FILE=$(ls /etc/netplan/*.yaml | head -n 1)
 
 if [ -n "$NETPLAN_FILE" ]; then
-    echo "Updating file: $NETPLAN_FILE"
+    echo "Updating file: $NETPLAN_FILE ($IFACE)"
     
-    # Делаем бэкап старого файла
+    # Делаем бэкап
     sudo cp "$NETPLAN_FILE" "${NETPLAN_FILE}.bak"
     
-    # Записываем чистый, идеальный YAML формат без предупреждений gateway4
+    # Генерируем чистый, идеальный YAML под текущую машину
     sudo tee "$NETPLAN_FILE" > /dev/null <<EOT
 network:
   version: 2
   ethernets:
-    eth0:
+    $IFACE:
       match:
-        macaddress: "bc:24:11:d6:d0:3b"
+        macaddress: "$MAC_ADDR"
       addresses:
-      - "89.125.121.233/24"
+      - "$IP_ADDR"
       nameservers:
         addresses:
         - 1.1.1.1
         - 1.0.0.1
-      set-name: "eth0"
+      set-name: "$IFACE"
       routes:
       - to: "default"
-        via: "89.125.121.1"
+        via: "$GATEWAY"
 EOT
 else
     echo "Warning: No Netplan files found."
@@ -53,4 +67,4 @@ sudo systemctl restart systemd-resolved
 
 # Проверка итогового статуса
 echo -e "\n=== Verification ==="
-resolvectl status eth0 2>/dev/null || resolvectl status
+resolvectl status "$IFACE" 2>/dev/null || resolvectl status
