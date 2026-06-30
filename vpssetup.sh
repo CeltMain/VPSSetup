@@ -350,13 +350,13 @@ sshd -t
 systemctl daemon-reload
 systemctl restart ssh.socket ssh.service || systemctl restart ssh
 echo "Cleaning up old firewall rules..."
-OLD_SSH_RULES=$(ufw status numbered | grep "SSH Custom Port" | awk -F'[' '{print $2}' | awk -F']' '{print $1}' | sort -rn || true)
-for num in $OLD_SSH_RULES; do
-    ufw --force delete "$num"
-done
-ufw allow $SSH_PORT/tcp comment 'SSH Custom Port'
-ufw allow 443/tcp
-ufw --force enable && ufw status numbered || true
+sudo ufw delete allow proto tcp from any to any port "$SSH_PORT" comment 'SSH Custom Port' >/dev/null 2>&1 || true
+ufw allow "$SSH_PORT"/tcp comment 'SSH Custom Port' >/dev/null 2>&1 || true
+ufw allow 443/tcp >/dev/null 2>&1 || true
+echo "Enabling UFW..."
+sudo ufw --force enable >/dev/null 2>&1 || true
+echo -e "\n=== Final Firewall Status ==="
+ufw status verbose | grep -E "Status|To|--" || ufw status
 
 # Auto Security Updates
 echo
