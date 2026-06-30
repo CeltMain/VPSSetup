@@ -349,14 +349,32 @@ mkdir -p /run/sshd
 sshd -t
 systemctl daemon-reload
 systemctl restart ssh.socket ssh.service || systemctl restart ssh
+
 echo "Cleaning up old firewall rules..."
 sudo ufw delete allow proto tcp from any to any port "$SSH_PORT" comment 'SSH Custom Port' >/dev/null 2>&1 || true
 ufw allow "$SSH_PORT"/tcp comment 'SSH Custom Port' >/dev/null 2>&1 || true
 ufw allow 443/tcp >/dev/null 2>&1 || true
+
 echo "Enabling UFW..."
 sudo ufw --force enable >/dev/null 2>&1 || true
 echo -e "\n=== Final Firewall Status ==="
 ufw status verbose | grep -E "Status|To|--" || ufw status
+
+# Auto Security Updates
+echo
+echo "=== Enabling Auto Security Updates Setup ==="
+echo "Checking for background package managers..."
+while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do 
+    echo -n "." 
+    sleep 3
+done
+echo " Package manager is free. Proceeding..."
+apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" install unattended-upgrades -y
+tee /etc/apt/apt.conf.d/20auto-upgrades > /dev/null <<EOT
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+EOT
+echo "Done"
 
 # Auto Security Updates
 echo
@@ -493,39 +511,44 @@ fi
 # Cleaning Service
 echo
 echo "=== Cleaning Service & Deep Disk Cleanup ==="
-if [ -f /swap.img ]; then
-    echo "Found old /swap.img. Deactivating and removing..."
-    swapoff /swap.img 2>/dev/null || true
-    rm -f /swap.img
+if [ -f /swap.img ]; then 
+    echo "Found old /swap.img. Deactivating and removing..." 
+    swapoff /swap.img 2>/dev/null || true 
+    rm -f /swap.img 
     sed -i '\/swap.img/d' /etc/fstab
 fi
-if command -v journalctl >/dev/null 2>&1; then
-    echo "Vacuuming systemd journal logs to 100M..."
+
+if command -v journalctl >/dev/null 2>&1; then 
+    echo "Vacuuming systemd journal logs to 100M..." 
     journalctl --vacuum-size=100M >/dev/null 2>&1 || true
 fi
+
 echo "Clearing heavy system logs..."
 truncate -s 0 /var/log/syslog 2>/dev/null || true
 rm -f /var/log/syslog.1 2>/dev/null || true
 rm -f /var/log/syslog.*.gz 2>/dev/null || true
+
 echo "Configuring custom logrotate policy for syslog..."
 tee /etc/logrotate.d/syslog-custom > /dev/null << 'EOF'
-/var/log/syslog {
-    daily
-    rotate 2
-    maxsize 50M
-    missingok
-    notifempty
-    delaycompress
-    compress
-    postrotate
-        /usr/lib/rsyslog/rsyslog-rotate
+/var/log/syslog { 
+    daily 
+    rotate 2 
+    maxsize 50M 
+    missingok 
+    notifempty 
+    delaycompress 
+    compress 
+    postrotate 
+        /usr/lib/rsyslog/rsyslog-rotate 
     endscript
 }
 EOF
-if command -v docker >/dev/null 2>&1; then
-    echo "Cleaning unused Docker resources..."
+
+if command -v docker >/dev/null 2>&1; then 
+    echo "Cleaning unused Docker resources..." 
     docker system prune -f >/dev/null 2>&1 || true
 fi
+
 echo "Running APT package cleanup..."
 apt-get autoclean -y
 apt-get autoremove --purge -y
