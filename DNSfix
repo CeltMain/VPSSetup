@@ -25,7 +25,6 @@ if [ -n "$NETPLAN_FILE" ]; then
     if netplan get all --format json >/dev/null 2>&1; then
         export CURRENT_JSON=$(netplan get all --format json)
     else
-        # Fallback if --format json is not supported: use Python with PyYAML (standard for Netplan)
         export CURRENT_JSON="USE_YAML"
     fi
 
@@ -33,13 +32,12 @@ if [ -n "$NETPLAN_FILE" ]; then
 
     # Modify network data safely using environment variables
     sudo -E python3 -c "
-import json, sys, os
+import json, sys, os, yaml
 
 netplan_file = os.environ['NETPLAN_FILE_PATH']
 current_json = os.environ['CURRENT_JSON']
 
 if current_json == 'USE_YAML':
-    import yaml
     with open(netplan_file, 'r') as f:
         data = yaml.safe_load(f)
 else:
@@ -58,9 +56,9 @@ if 'network' in data and 'ethernets' in data['network']:
             if not any(r.get('to') == 'default' for r in iface['routes']):
                 iface['routes'].append({'to': 'default', 'via': gw})
 
-# Write configuration back as valid JSON format
+# Write configuration back as valid YAML format using system's standard yaml processor
 with open(netplan_file, 'w') as f:
-    json.dump(data, f, indent=2)
+    yaml.dump(data, f, default_flow_style=False)
 "
 else
     echo "Warning: No Netplan files found."
