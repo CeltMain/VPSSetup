@@ -21,13 +21,29 @@ if [ -n "$NETPLAN_FILE" ]; then
     # Backup original file just in case
     sudo cp "$NETPLAN_FILE" "${NETPLAN_FILE}.bak"
     
-    # Export current config to JSON using netplan's native tool
-    CURRENT_JSON=$(netplan get all --format json 2>/dev/null || netplan get all)
+    # Export current config to JSON using netplan's native tool safely
+    if netplan get all --format json >/dev/null 2>&1; then
+        export CURRENT_JSON=$(netplan get all --format json)
+    else
+        # Fallback if --format json is not supported: use Python with PyYAML (standard for Netplan)
+        export CURRENT_JSON="USE_YAML"
+    fi
 
-    # Modify network data safely using Python's built-in json module (always available)
-    sudo python3 -c "
-import json, sys
-data = json.loads('''$CURRENT_JSON''')
+    export NETPLAN_FILE_PATH="$NETPLAN_FILE"
+
+    # Modify network data safely using environment variables
+    sudo -E python3 -c "
+import json, sys, os
+
+netplan_file = os.environ['NETPLAN_FILE_PATH']
+current_json = os.environ['CURRENT_JSON']
+
+if current_json == 'USE_YAML':
+    import yaml
+    with open(netplan_file, 'r') as f:
+        data = yaml.safe_load(f)
+else:
+    data = json.loads(current_json)
 
 if 'network' in data and 'ethernets' in data['network']:
     for iface in data['network']['ethernets'].values():
@@ -42,8 +58,8 @@ if 'network' in data and 'ethernets' in data['network']:
             if not any(r.get('to') == 'default' for r in iface['routes']):
                 iface['routes'].append({'to': 'default', 'via': gw})
 
-# Write configuration back to the original file
-with open('$NETPLAN_FILE', 'w') as f:
+# Write configuration back as valid JSON format
+with open(netplan_file, 'w') as f:
     json.dump(data, f, indent=2)
 "
 else
