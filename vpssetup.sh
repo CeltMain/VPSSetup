@@ -232,10 +232,14 @@ while true; do
         echo -e "Error: Invalid input. Please enter 'y' or 'n'\n"
     fi
 done
+
 echo "Configuring $PROVIDER_NAME (DNS over TLS: $ENABLE_DOT, DNSSEC: $DNSSEC_POLICY)..."
+
 if systemctl list-unit-files | grep -q "systemd-resolved"; then
     rm -f /etc/systemd/resolved.conf.d/dot-custom.conf || true
     mkdir -p /etc/systemd/resolved.conf.d
+    
+    # Чистая конфигурация БЕЗ разрушительной строки Domains=~.
     tee /etc/systemd/resolved.conf.d/dot-custom.conf > /dev/null <<EOT
 [Resolve]
 DNS=$DNS_FINAL_SERVERS
@@ -243,23 +247,31 @@ DNSOverTLS=$ENABLE_DOT
 DNSSEC=$DNSSEC_POLICY
 FallbackDNS=8.8.8.8 1.1.1.1
 EOT
+
     systemctl daemon-reload
     systemctl enable systemd-resolved --now >/dev/null 2>&1 || true
     systemctl restart systemd-resolved || true
+    
     if [ -f /run/systemd/resolve/stub-resolv.conf ]; then
         ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
     fi  
+    
+    # Сброс кэша оперативной памяти
     resolvectl flush-caches >/dev/null 2>&1 || true
+    
     echo -e "\n=== Verification ==="
-    NET_INT=$(ip route | grep default | awk '{print $5}' | head -n 1)
-    if [ -n "$NET_INT" ]; then
-        resolvectl status "$NET_INT" 2>/dev/null || resolvectl status
-    else
-        resolvectl status
-    fi
+    # Выводим общий статус. Так как кастомных доменных петель больше нет, 
+    # здесь отобразится чистая и правильная глобальная конфигурация.
+    resolvectl status
+    
     echo -e "\n=== DNS Speed & Connectivity Test ==="
     if command -v dig >/dev/null 2>&1; then
         echo "Measuring DNS response time to $TEST_DOMAIN via secure resolver..."
+        
+        # «Прогреваем» TLS-сессию один раз в фоне, чтобы замер ниже не тормозил
+        dig @127.0.0.53 "$TEST_DOMAIN" +short >/dev/null 2>&1 || true
+        
+        # Настоящий замер скорости
         SPEED_TEST=$(dig @127.0.0.53 "$TEST_DOMAIN" | grep "Query time" || true)
         if [ -n "$SPEED_TEST" ]; then
             echo "Result: $SPEED_TEST"
@@ -296,7 +308,6 @@ while true; do
         IPV6_INPUT="n"
         echo -e "\e[1A\e[KYour choice: n"
     fi
-    
     if [ "${IPV6_INPUT,,}" = "y" ] || [ "${IPV6_INPUT,,}" = "yes" ]; then
         echo "Disabling IPv6 in UFW configuration..."
         sed -i 's/IPV6=yes/IPV6=no/' /etc/default/ufw
