@@ -11,7 +11,7 @@ sudo rm -f /etc/systemd/resolved.conf.d/dot-custom.conf
 echo "[2/4] Restoring standard resolv.conf symlink..."
 sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 
-# 3. Clean and fix Netplan safely using Python built-in JSON module
+# 3. Clean and fix Netplan safely using system tools and Python JSON
 echo "[3/4] Updating Netplan configuration safely..."
 NETPLAN_FILE=$(ls /etc/netplan/*.yaml | head -n 1)
 
@@ -21,24 +21,20 @@ if [ -n "$NETPLAN_FILE" ]; then
     # Backup original file just in case
     sudo cp "$NETPLAN_FILE" "${NETPLAN_FILE}.bak"
     
-    # Safe modification with Python using built-in JSON (eliminates PyYAML dependency)
-    # Also modernizes 'gateway4' to 'routes' to prevent Netplan warnings
+    # Export current config to JSON using netplan's native tool
+    CURRENT_JSON=$(netplan get all --format json 2>/dev/null || netplan get all)
+
+    # Modify network data safely using Python's built-in json module (always available)
     sudo python3 -c "
 import json, sys
-try:
-    import yaml
-    with open('$NETPLAN_FILE', 'r') as f: data = yaml.safe_load(f)
-except ImportError:
-    # Fallback if PyYAML is not installed: read via netplan's tool or basic parser
-    import subprocess
-    res = subprocess.run(['netplan', 'get', 'all'], capture_output=True, text=True)
-    import yaml as y # if netplan is present, yaml might be available via system
-    data = yaml.safe_load(res.stdout)
+data = json.loads('''$CURRENT_JSON''')
 
 if 'network' in data and 'ethernets' in data['network']:
     for iface in data['network']['ethernets'].values():
+        # Update DNS to Cloudflare
         if 'nameservers' in iface:
             iface['nameservers']['addresses'] = ['1.1.1.1', '1.0.0.1']
+        # Fix deprecated gateway4 warning
         if 'gateway4' in iface and iface['gateway4']:
             gw = iface.pop('gateway4')
             if 'routes' not in iface:
@@ -46,7 +42,7 @@ if 'network' in data and 'ethernets' in data['network']:
             if not any(r.get('to') == 'default' for r in iface['routes']):
                 iface['routes'].append({'to': 'default', 'via': gw})
 
-# Write back as pure JSON (Netplan natively supports JSON syntax perfectly)
+# Write configuration back to the original file
 with open('$NETPLAN_FILE', 'w') as f:
     json.dump(data, f, indent=2)
 "
