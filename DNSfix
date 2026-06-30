@@ -1,97 +1,47 @@
-# DNS Configuration
-echo
-echo "=== DNS Setup ==="
-while true; do
-    echo "Select DNS provider:"
-    echo "  1) Quad9 (Privacy)"
-    echo "  2) Cloudflare (Speed) [Default]"
-    echo "  3) Google (Stability)"
-    echo "  4) Yandex (For RU segment, Basic filtering)"
-    read -p "Your choice (1-4): " DNS_CHOICE
-    if [ -z "$DNS_CHOICE" ]; then
-        DNS_CHOICE="2"
-        echo -e "\e[1A\e[KYour choice (1-4): 2"
-    fi
-    case "$DNS_CHOICE" in
-        1)
-            DNS_IPS="9.9.9.9 149.112.112.112"
-            DNS_DOT_SERVERS="9.9.9.9#dns.quad9.net 149.112.112.112#dns.quad9.net"
-            PROVIDER_NAME="Quad9"
-            break
-            ;;
-        2)
-            DNS_IPS="1.1.1.1 1.0.0.1"
-            DNS_DOT_SERVERS="1.1.1.1#cloudflare-dns.com 1.0.0.1#cloudflare-dns.com"
-            PROVIDER_NAME="Cloudflare"
-            break
-            ;;
-        3)
-            DNS_IPS="8.8.8.8 8.8.4.4"
-            DNS_DOT_SERVERS="8.8.8.8#dns.google 8.8.4.4#dns.google"
-            PROVIDER_NAME="Google"
-            break
-            ;;
-        4)
-            DNS_IPS="77.88.8.8 77.88.8.1"
-            DNS_DOT_SERVERS="77.88.8.8#common.dns.yandex.ru 77.88.8.1#common.dns.yandex.ru"
-            PROVIDER_NAME="Yandex"
-            break
-            ;;
-        *)
-            echo "Error: Invalid choice. Please enter a number between 1 and 4."
-            ;;
-    esac
-done
-echo
-while true; do
-    echo "Do you want to enable DNS over TLS (DoT) for $PROVIDER_NAME? (y/n) [Default: y]"
-    read -p "Your choice: " DOT_INPUT
-    if [ -z "$DOT_INPUT" ]; then
-        DOT_INPUT="y"
-        echo -e "\e[1A\e[KYour choice: y"
-    fi
-    if [ "${DOT_INPUT,,}" = "y" ] || [ "${DOT_INPUT,,}" = "yes" ]; then
-        ENABLE_DOT="yes"
-        DNS_FINAL_SERVERS="$DNS_DOT_SERVERS"
-        break
-    elif [ "${DOT_INPUT,,}" = "n" ] || [ "${DOT_INPUT,,}" = "no" ]; then
-        ENABLE_DOT="no"
-        DNS_FINAL_SERVERS="$DNS_IPS"
-        break
-    else
-        echo -e "Error: Invalid input. Please enter 'y' or 'n'\n"
-    fi
-done
-DNSSEC_POLICY="yes"
-echo "Configuring $PROVIDER_NAME (DNS over TLS: $ENABLE_DOT, DNSSEC: $DNSSEC_POLICY)..."
-rm -f /etc/systemd/resolved.conf.d/*.conf || true
-mkdir -p /etc/systemd/resolved.conf.d
-tee /etc/systemd/resolved.conf.d/dot-custom.conf > /dev/null <<EOT
-[Resolve]
-DNS=$DNS_FINAL_SERVERS
-Domains=~.
-DNSOverTLS=$ENABLE_DOT
-DNSSEC=$DNSSEC_POLICY
-EOT
-if systemctl list-unit-files | grep -q "systemd-resolved"; then
-    systemctl daemon-reload
-    systemctl restart systemd-resolved || true
-    if [ "$ENABLE_DOT" = "yes" ]; then
-        if [ -f /run/systemd/resolve/stub-resolv.conf ]; then
-            ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
-        fi
-    else
-        if [ -f /run/systemd/resolve/resolv.conf ]; then
-            ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
-        fi
-    fi
-    NET_INT=$(ip route | grep default | awk '{print $5}')
-    if [ -n "$NET_INT" ]; then
-        resolvectl dns "$NET_INT" "" 2>/dev/null || true
-        resolvectl domain "$NET_INT" "" 2>/dev/null || true
-    fi
-    echo
-    resolvectl status 2>/dev/null || true
+#!/bin/bash
+set -e
+
+echo "=== Начало восстановления сетевых настроек ==="
+
+# 1. Удаление кастомной конфигурации systemd-resolved
+echo "[1/5] Удаление файлов конфигурации скрипта..."
+sudo rm -f /etc/systemd/resolved.conf.d/dot-custom.conf
+
+# 2. Восстановление стандартной символической ссылки resolv.conf
+echo "[2/5] Восстановление стандартного resolv.conf..."
+sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+
+# 3. Автоматический поиск файла Netplan и замена старого DNS на Cloudflare
+echo "[3/5] Поиск и обновление конфигурации Netplan..."
+NETPLAN_FILE=$(ls /etc/netplan/*.yaml | head -n 1)
+
+if [ -n "$NETPLAN_FILE" ]; then
+    echo "Найден файл конфигурации: $NETPLAN_FILE"
+    # Удаляем старый IP Яндекса (или любой другой) и аккуратно вставляем Cloudflare
+    sudo sed -i '/nameservers:/,/addresses:/ { /-[[:space:]]/d }' "$NETPLAN_FILE"
+    sudo sed -i '/addresses:/a \        - 1.1.1.1\n        - 1.0.0.1' "$NETPLAN_FILE"
+    # Убираем возможные пустые дубликаты строк, если скрипт запускается повторно
+    sudo sed -i '/- 1.1.1.1/{N;/- 1.0.0.1/!D}' "$NETPLAN_FILE"
 else
-    echo "Warning: systemd-resolved is not installed or active on this system. Configuration saved but not applied to network manager."
+    echo "Предупреждение: Файлы Netplan не найдены."
 fi
+
+# 4. Применение сетевых настроек
+echo "[4/5] Применение параметров сети..."
+sudo netplan apply
+sudo systemctl daemon-reload
+sudo systemctl restart systemd-networkd
+sudo systemctl restart systemd-resolved
+
+# 5. Проверка статуса
+echo -e "\n[5/5] Проверка итогового статуса сети:"
+echo "----------------------------------------"
+# Автоопределение активного интерфейса
+MAIN_INT=$(ip route | grep default | awk '{print $5}' | head -n 1)
+if [ -n "$MAIN_INT" ]; then
+    resolvectl status "$MAIN_INT"
+else
+    resolvectl status
+fi
+echo "----------------------------------------"
+echo "=== Восстановление успешно завершено! ==="
