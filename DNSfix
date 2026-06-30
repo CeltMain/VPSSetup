@@ -1,47 +1,56 @@
 #!/bin/bash
 set -e
 
-echo "=== Начало восстановления сетевых настроек ==="
+echo "=== DNS Configuration Restore Script ==="
 
-# 1. Удаление кастомной конфигурации systemd-resolved
-echo "[1/5] Удаление файлов конфигурации скрипта..."
+# 1. Remove custom systemd-resolved config
+echo "[1/4] Removing custom script configurations..."
 sudo rm -f /etc/systemd/resolved.conf.d/dot-custom.conf
 
-# 2. Восстановление стандартной символической ссылки resolv.conf
-echo "[2/5] Восстановление стандартного resolv.conf..."
+# 2. Restore standard resolv.conf symlink
+echo "[2/4] Restoring standard resolv.conf symlink..."
 sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 
-# 3. Автоматический поиск файла Netplan и замена старого DNS на Cloudflare
-echo "[3/5] Поиск и обновление конфигурации Netplan..."
+# 3. Clean and fix Netplan safely using Python
+echo "[3/4] Updating Netplan configuration safely..."
 NETPLAN_FILE=$(ls /etc/netplan/*.yaml | head -n 1)
 
 if [ -n "$NETPLAN_FILE" ]; then
-    echo "Найден файл конфигурации: $NETPLAN_FILE"
-    # Удаляем старый IP Яндекса (или любой другой) и аккуратно вставляем Cloudflare
-    sudo sed -i '/nameservers:/,/addresses:/ { /-[[:space:]]/d }' "$NETPLAN_FILE"
-    sudo sed -i '/addresses:/a \        - 1.1.1.1\n        - 1.0.0.1' "$NETPLAN_FILE"
-    # Убираем возможные пустые дубликаты строк, если скрипт запускается повторно
-    sudo sed -i '/- 1.1.1.1/{N;/- 1.0.0.1/!D}' "$NETPLAN_FILE"
+    echo "Found config file: $NETPLAN_FILE"
+    
+    # Backup original file just in case
+    sudo cp "$NETPLAN_FILE" "${NETPLAN_FILE}.bak"
+    
+    # Inline Python script to modify YAML safely
+    sudo python3 -c "
+import yaml
+with open('$NETPLAN_FILE', 'r') as f:
+    data = yaml.safe_load(f)
+
+if 'network' in data and 'ethernets' in data['network']:
+    for iface in data['network']['ethernets'].values():
+        if 'nameservers' in iface:
+            iface['nameservers']['addresses'] = ['1.1.1.1', '1.0.0.1']
+
+with open('$NETPLAN_FILE', 'w') as f:
+    yaml.dump(data, f, default_flow_style=False)
+"
 else
-    echo "Предупреждение: Файлы Netplan не найдены."
+    echo "Warning: No Netplan files found."
 fi
 
-# 4. Применение сетевых настроек
-echo "[4/5] Применение параметров сети..."
+# 4. Apply network configuration
+echo "[4/4] Applying network settings..."
 sudo netplan apply
 sudo systemctl daemon-reload
 sudo systemctl restart systemd-networkd
 sudo systemctl restart systemd-resolved
 
-# 5. Проверка статуса
-echo -e "\n[5/5] Проверка итогового статуса сети:"
-echo "----------------------------------------"
-# Автоопределение активного интерфейса
+# Final Verification
+echo -e "\n=== Verification ==="
 MAIN_INT=$(ip route | grep default | awk '{print $5}' | head -n 1)
 if [ -n "$MAIN_INT" ]; then
     resolvectl status "$MAIN_INT"
 else
     resolvectl status
 fi
-echo "----------------------------------------"
-echo "=== Восстановление успешно завершено! ==="
