@@ -166,12 +166,6 @@ free -h
 echo
 echo "=== DNS Setup ==="
 
-# Автоматически определяем имя активного сетевого интерфейса (например, eth0 или ens3)
-INTERFACE_NAME=$(ip -4 route show default | awk '{print $5}' | head -n 1)
-if [ -z "$INTERFACE_NAME" ]; then
-    INTERFACE_NAME="eth0"
-fi
-
 while true; do
     echo "Select DNS provider:"
     echo "  1) Cloudflare (Speed) [Default]"
@@ -213,9 +207,7 @@ while true; do
             break
             ;;
         *)
-            echo -e "\e[1A\e[KError: Invalid choice. Try again."
-            sleep 1
-            echo -e "\e[1A\e[K"
+            echo "Error: Invalid choice. Try again."
             ;;
     esac
 done
@@ -230,93 +222,59 @@ while true; do
     fi
     if [ "${DOT_INPUT,,}" = "y" ] || [ "${DOT_INPUT,,}" = "yes" ]; then
         ENABLE_DOT="yes"
-        DNS_RESOLVED_SERVERS="$DNS_DOT_SERVERS"
+        DNS_FINAL="$DNS_DOT_SERVERS"
         break
     elif [ "${DOT_INPUT,,}" = "n" ] || [ "${DOT_INPUT,,}" = "no" ]; then
         ENABLE_DOT="no"
-        DNS_RESOLVED_SERVERS="$DNS_IPS"
+        DNS_FINAL="$DNS_IPS"
         break
     else
-        echo -e "\e[1A\e[KError: Invalid input. Please enter 'y' or 'n'"
-        sleep 1
-        echo -e "\e[1A\e[K"
+        echo -e "Error: Invalid input. Please enter 'y' or 'n'"
     fi
 done
 
-echo "Configuring $PROVIDER_NAME (DNS over TLS: $ENABLE_DOT) on interface $INTERFACE_NAME..."
+echo "Configuring $PROVIDER_NAME (DNS over TLS: $ENABLE_DOT)..."
 
-# Шаг 1. Безопасное обновление Netplan (только чистые IP-адреса, без спецсимволов)
-NETPLAN_FILE=$(ls /etc/netplan/*.yaml 2>/dev/null | head -n 1)
-if [ -n "$NETPLAN_FILE" ] && [ -f "$NETPLAN_FILE" ]; then
-    echo "Updating Netplan configuration in $NETPLAN_FILE..."
-    cp "$NETPLAN_FILE" "${NETPLAN_FILE}.bak_dns"
-    
-    # Сначала удаляем старый блок nameservers (ориентируясь на 6 пробелов перед addresses)
-    sed -i '/nameservers:/d; /^[[:space:]]\{6\}addresses:/d; /^[[:space:]]*- [0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/d' "$NETPLAN_FILE"
-    
-    # ВОТ ЗДЕСЬ ВСЁ ДОЛЖНО БЫТЬ ЗАКРЫТО КОРРЕКТНО:
-    awk -v iface="        $INTERFACE_NAME:" -v ips="$DNS_IPS" '
-    {
-        print $0
-        if ($0 ~ "^  [[:space:]]*" substr(iface, 9) || $0 ~ "^[[:space:]]*" iface) {
-            print "      nameservers:"
-            print "        addresses:"
-            split(ips, arr, " ")
-            for (i in arr) {
-                print "        - " arr[i]
-            }
-        }
-    }' "$NETPLAN_FILE" > "${NETPLAN_FILE}.tmp" && mv "${NETPLAN_FILE}.tmp" "$NETPLAN_FILE"
-    
-    netplan apply >/dev/null 2>&1 || true
-fi
-
-# Шаг 2. Настройка глобального демона systemd-resolved
+# Настройка systemd-resolved (глобально)
 if systemctl list-unit-files | grep -q "systemd-resolved"; then
-    rm -f /etc/systemd/resolved.conf.d/dot-custom.conf || true
+    rm -f /etc/systemd/resolved.conf.d/dot-custom.conf 2>/dev/null || true
     mkdir -p /etc/systemd/resolved.conf.d
     
-    tee /etc/systemd/resolved.conf.d/dot-custom.conf > /dev/null <<EOT
+    cat > /etc/systemd/resolved.conf.d/dot-custom.conf <<EOF
 [Resolve]
-DNS=$DNS_RESOLVED_SERVERS
+DNS=$DNS_FINAL
 DNSOverTLS=$ENABLE_DOT
 DNSSEC=no
 FallbackDNS=8.8.8.8 1.1.1.1
-EOT
+EOF
 
     systemctl daemon-reload
-    systemctl enable systemd-resolved --now >/dev/null 2>&1 || true
+    systemctl enable systemd-resolved --now 2>/dev/null || true
     systemctl restart systemd-resolved || true
     
     if [ -f /run/systemd/resolve/stub-resolv.conf ]; then
         ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
-    fi  
-    
-    # Шаг 3. Фиксация DoT-хостов напрямую на сетевом интерфейсе
-    if [ "$ENABLE_DOT" = "yes" ]; then
-        resolvectl dns "$INTERFACE_NAME" $DNS_DOT_SERVERS >/dev/null 2>&1 || true
-    else
-        resolvectl dns "$INTERFACE_NAME" $DNS_IPS >/dev/null 2>&1 || true
     fi
     
-    resolvectl flush-caches >/dev/null 2>&1 || true
+    # Очистка кэша
+    resolvectl flush-caches 2>/dev/null || true
     
     echo -e "\n=== Verification ==="
-    resolvectl status "$INTERFACE_NAME"
+    resolvectl status
     
     echo -e "\n=== DNS Connectivity Test ==="
     if ping -c 2 -W 3 "$TEST_DOMAIN" >/dev/null 2>&1; then
-        echo "DNS Status: OK (Domain successfully resolved and pinged)."
+        echo "DNS Status: OK (Domain resolved and reachable)."
     else
-        echo "DNS Status: WARNING (Network unreachable or resolve failed)."
+        echo "DNS Status: WARNING (Could not ping domain, but DNS may still work)."
     fi
 else
-    echo "Warning: systemd-resolved is not active. Configuring classic /etc/resolv.conf..."
-    sudo rm -f /etc/resolv.conf
+    echo "Warning: systemd-resolved is not active. Configuring static /etc/resolv.conf..."
+    rm -f /etc/resolv.conf
     for ip in $DNS_IPS; do
-        echo "nameserver $ip" | sudo tee -a /etc/resolv.conf > /dev/null
+        echo "nameserver $ip" >> /etc/resolv.conf
     done
-    echo "Configuration applied via static resolv.conf successfully."
+    echo "Static resolv.conf configured."
 fi
 
 # SSH && UFW
