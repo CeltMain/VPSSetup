@@ -181,7 +181,6 @@ while true; do
     read -p "Your choice (1-4): " DNS_CHOICE
     if [ -z "$DNS_CHOICE" ]; then
         DNS_CHOICE="1"
-        # Очищаем строку ввода и пишем дефолт
         echo -e "\e[1A\e[KYour choice (1-4): 1"
     fi
     case "$DNS_CHOICE" in
@@ -214,7 +213,6 @@ while true; do
             break
             ;;
         *)
-            # Чистим ошибочный ввод, чтобы меню не дублировалось на весь экран
             echo -e "\e[1A\e[KError: Invalid choice. Try again."
             sleep 1
             echo -e "\e[1A\e[K"
@@ -253,18 +251,24 @@ if [ -n "$NETPLAN_FILE" ] && [ -f "$NETPLAN_FILE" ]; then
     echo "Updating Netplan configuration in $NETPLAN_FILE..."
     cp "$NETPLAN_FILE" "${NETPLAN_FILE}.bak_dns"
     
-    # Удаляем старый блок nameservers (ориентируясь строго на 6 пробелов перед addresses)
+    # Сначала удаляем старый блок nameservers (ориентируясь на 6 пробелов перед addresses)
     sed -i '/nameservers:/d; /^[[:space:]]\{6\}addresses:/d; /^[[:space:]]*- [0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/d' "$NETPLAN_FILE"
     
-    # Генерируем новые строки без ломающего Bash экранирования
-    YAML_IPS=""
-    for ip in $DNS_IPS; do
-        YAML_IPS="${YAML_IPS}        - ${ip}\n"
-    fi
-    CLEAN_YAML=$(echo -e "$YAML_IPS" | sed 's/\n$//')
-    
-    # Вставляем блок под интерфейс
-    sed -i "/$INTERFACE_NAME:/a\      nameservers:\n        addresses:\n$CLEAN_YAML" "$NETPLAN_FILE"
+    # ИСПРАВЛЕНИЕ: Используем полностью безопасный awk для вставки блока без ломающих спецсимволов \n
+    # Находим строку с сетевым интерфейсом и дописываем под неё структуру nameservers
+    awk -v iface="        $INTERFACE_NAME:" -v ips="$DNS_IPS" '
+    {
+        print $0
+        # Если строка содержит имя интерфейса с нужным отступом, добавляем под неё блок DNS
+        if ($0 ~ "^  [[:space:]]*" substr(iface, 9) || $0 ~ "^[[:space:]]*" iface) {
+            print "      nameservers:"
+            print "        addresses:"
+            split(ips, arr, " ")
+            for (i in arr) {
+                print "        - " arr[i]
+            }
+        }
+    }' "$NETPLAN_FILE" > "${NETPLAN_FILE}.tmp" && mv "${NETPLAN_FILE}.tmp" "$NETPLAN_FILE"
     
     netplan apply >/dev/null 2>&1 || true
 fi
