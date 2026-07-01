@@ -2,16 +2,11 @@
 
 # Close if any error
 set -e
-# Check root privileges
-if [ "$EUID" -ne 0 ]; then
-  echo "Error: This script must be run as root or via sudo!"
-  exit 1
-fi
 # Update
 echo
 echo "=== Updating package lists and upgrading system ==="
-DEBIAN_FRONTEND=noninteractive apt-get update -y
-DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" upgrade -y
+sudo DEBIAN_FRONTEND=noninteractive apt-get update -y
+sudo DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" upgrade -y
 echo "Done"
 
 # Requesting variables from the user before starting
@@ -78,7 +73,6 @@ echo
 echo "=== Swap file Setup ==="
 TOTAL_RAM=$(free -m | awk '/^Mem:/{print $2}')
 echo "Detected RAM: ${TOTAL_RAM}MB"
-SKIP_CREATION=false
 while true; do
     echo "Do you want to create a swap file? (y/n) [Default: y]"
     read -p "Your choice: " SWAP_INPUT
@@ -110,20 +104,18 @@ if [ "$CREATE_SWAP" = true ]; then
                 echo -e "\e[1A\e[KYour choice: n"
             fi
             if [ "${REPLACE_INPUT,,}" = "y" ] || [ "${REPLACE_INPUT,,}" = "yes" ]; then
-                echo "Deactivating identified swap sources..."
+                echo "Deactivating ALL current swap sources..."
                 OTHER_SWAPS=$(swapon --show=NAME,TYPE | grep "file" | awk '{print $1}' | grep -v "/swapfile" || true)
-                if [ -f /swapfile ]; then swapoff /swapfile 2>/dev/null || true; fi
-                if [ -f /swap.img ]; then swapoff /swap.img 2>/dev/null || true; fi
+                sudo swapoff -a || true
                 for s_file in $OTHER_SWAPS; do
                     if [ -f "$s_file" ]; then
                         echo "Removing old swap file with custom name: $s_file"
-                        swapoff "$s_file" 2>/dev/null || true # ИСПРАВЛЕНИЕ: Точечное отключение
-                        rm -f "$s_file"
-                        sed -i "\|$s_file|d" /etc/fstab
+                        sudo rm -f "$s_file"
+                        sudo sed -i "\|$s_file|d" /etc/fstab
                     fi
                 done
-                rm -f /swapfile /swap.img
-                sed -i '/swap/d' /etc/fstab
+                sudo rm -f /swapfile /swap.img
+                sudo sed -i '/swap/d' /etc/fstab
                 break
             elif [ "${REPLACE_INPUT,,}" = "n" ] || [ "${REPLACE_INPUT,,}" = "no" ]; then
                 SKIP_CREATION=true
@@ -151,450 +143,186 @@ if [ "$CREATE_SWAP" = true ]; then
             fi
         done
         echo "Creating a new ${SWAP_SIZE}GB swap file..."
-        fallocate -l "${SWAP_SIZE}G" /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=$((SWAP_SIZE * 1024))
-        chmod 600 /swapfile
-        mkswap /swapfile
-        swapon /swapfile
-        echo '/swapfile none swap sw 0 0' | tee -a /etc/fstab
+        sudo fallocate -l "${SWAP_SIZE}G" /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=$((SWAP_SIZE * 1024))
+        sudo chmod 600 /swapfile
+        sudo mkswap /swapfile
+        sudo swapon /swapfile
+        echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
         echo "New swapfile successfully created and activated."
     fi
 fi
 echo
 free -h
 
-# DNS Configuration
+# DNS over TLS
 echo
-echo "=== DNS Setup ==="
-
+echo "=== DNS over TLS (DoT) Setup ==="
 while true; do
-    echo "Select DNS provider:"
-    echo "  1) Cloudflare (Speed) [Default]"
-    echo "  2) Google (Stability)"
-    echo "  3) Quad9 (Privacy)"
-    echo "  4) Yandex (For RU segment, Basic filtering)"
-    read -p "Your choice (1-4): " DNS_CHOICE
-    if [ -z "$DNS_CHOICE" ]; then
-        DNS_CHOICE="1"
-        echo -e "\e[1A\e[KYour choice (1-4): 1"
-    fi
-    case "$DNS_CHOICE" in
-        1)
-            DNS_IPS="1.1.1.1 1.0.0.1"
-            DNS_DOT_SERVERS="1.1.1.1#cloudflare-dns.com 1.0.0.1#cloudflare-dns.com"
-            PROVIDER_NAME="Cloudflare"
-            TEST_DOMAIN="cloudflare.com"
-            break
-            ;;
-        2)
-            DNS_IPS="8.8.8.8 8.8.4.4"
-            DNS_DOT_SERVERS="8.8.8.8#dns.google 8.8.4.4#dns.google"
-            PROVIDER_NAME="Google"
-            TEST_DOMAIN="dns.google"
-            break
-            ;;
-        3)
-            DNS_IPS="9.9.9.9 149.112.112.112"
-            DNS_DOT_SERVERS="9.9.9.9#dns.quad9.net 149.112.112.112#dns.quad9.net"
-            PROVIDER_NAME="Quad9"
-            TEST_DOMAIN="dns.quad9.net"
-            break
-            ;;
-        4)
-            DNS_IPS="77.88.8.8 77.88.8.1"
-            DNS_DOT_SERVERS="77.88.8.8#common.dns.yandex.ru 77.88.8.1#common.dns.yandex.ru"
-            PROVIDER_NAME="Yandex"
-            TEST_DOMAIN="yandex.ru"
-            break
-            ;;
-        *)
-            echo -e "\e[1A\e[KError: Invalid choice. Try again."
-            sleep 1
-            echo -e "\e[1A\e[K"
-            ;;
-    esac
-done
-
-echo
-while true; do
-    echo "Do you want to enable DNS over TLS (DoT) for $PROVIDER_NAME? (y/n) [Default: y]"
+    echo "Do you want to enable DNS over TLS (DoT)? (y/n) [Default: y]"
     read -p "Your choice: " DOT_INPUT
     if [ -z "$DOT_INPUT" ]; then
         DOT_INPUT="y"
         echo -e "\e[1A\e[KYour choice: y"
     fi
     if [ "${DOT_INPUT,,}" = "y" ] || [ "${DOT_INPUT,,}" = "yes" ]; then
-        ENABLE_DOT="yes"
-        DNS_FINAL="$DNS_DOT_SERVERS"
+        ENABLE_DOT=true
+        echo "Proceeding to configure DNS over TLS..."
         break
     elif [ "${DOT_INPUT,,}" = "n" ] || [ "${DOT_INPUT,,}" = "no" ]; then
-        ENABLE_DOT="no"
-        DNS_FINAL="$DNS_IPS"
-        break
-    else
-        echo -e "\e[1A\e[KError: Invalid input. Please enter 'y' or 'n'"
-        sleep 1
-        echo -e "\e[1A\e[K"
-    fi
-done
-
-echo "Configuring global $PROVIDER_NAME (DNS over TLS: $ENABLE_DOT)..."
-
-if systemctl list-unit-files | grep -q "systemd-resolved"; then
-    # Полностью вычищаем старые кастомные конфиги resolved, если они были
-    rm -f /etc/systemd/resolved.conf.d/*.conf 2>/dev/null || true
-    mkdir -p /etc/systemd/resolved.conf.d
-    
-    # Записываем монументальную и чистую конфигурацию
-    cat > /etc/systemd/resolved.conf.d/dot-custom.conf <<EOF
-[Resolve]
-DNS=$DNS_FINAL
-DNSOverTLS=$ENABLE_DOT
-DNSSEC=no
-Domains=~.
-FallbackDNS=8.8.8.8 1.1.1.1
-EOF
-
-    # Перезапускаем глобальный резолвер
-    systemctl daemon-reload
-    systemctl enable systemd-resolved --now 2>/dev/null || true
-    systemctl restart systemd-resolved || true
-    
-    # Сбрасываем старые привязки на интерфейсах, чтобы вычистить «мусор»
-    INTERFACE_NAME=$(ip -4 route show default | awk '{print $5}' | head -n 1)
-    if [ -n "$INTERFACE_NAME" ]; then
-        resolvectl revert "$INTERFACE_NAME" 2>/dev/null || true
-    fi
-
-    # Перенаправляем классический resolv.conf на stub-резолвер systemd
-    if [ -f /run/systemd/resolve/stub-resolv.conf ]; then
-        ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
-    fi
-    
-    # Очищаем кэш оперативной памяти
-    resolvectl flush-caches 2>/dev/null || true
-    
-    echo -e "\n=== Verification ==="
-    resolvectl status
-    
-    echo -e "\n=== DNS Connectivity Test ==="
-    if ping -c 2 -W 3 "$TEST_DOMAIN" >/dev/null 2>&1; then
-        echo "DNS Status: OK (Domain successfully resolved and reachable)."
-    else
-        echo "DNS Status: WARNING (Network might be unreachable, but DNS structure is applied)."
-    fi
-else
-    echo "Warning: systemd-resolved is not active. Configuring static /etc/resolv.conf..."
-    rm -f /etc/resolv.conf
-    for ip in $DNS_IPS; do
-        echo "nameserver $ip" >> /etc/resolv.conf
-    done
-    echo "Static resolv.conf configured."
-fi
-
-# SSH && UFW
-echo
-echo "=== IPv6 Configuration in UFW ==="
-if [ -f /proc/net/if_inet6 ]; then
-    while true; do
-        echo "Do you want to DISABLE IPv6 in UFW? (y/n) [Default: n]"
-        read -p "Your choice: " IPV6_INPUT
-        if [ -z "$IPV6_INPUT" ]; then
-            IPV6_INPUT="n"
-            echo -e "\e[1A\e[KYour choice: n"
-        fi
-        if [ "${IPV6_INPUT,,}" = "y" ] || [ "${IPV6_INPUT,,}" = "yes" ]; then
-            echo "Disabling IPv6 in UFW configuration..."
-            sed -i 's/IPV6=yes/IPV6=no/' /etc/default/ufw
-            break
-        elif [ "${IPV6_INPUT,,}" = "n" ] || [ "${IPV6_INPUT,,}" = "no" ]; then
-            echo "Keeping IPv6 enabled in UFW configuration."
-            sed -i 's/IPV6=no/IPV6=yes/' /etc/default/ufw
-            break
-        else
-            echo -e "\e[1A\e[KError: Invalid input. Please enter 'y' or 'n'"
-            sleep 1
-            echo -e "\e[1A\e[K"
-        fi
-    done
-else
-    echo "Notice: IPv6 is disabled or not supported by your host provider."
-    echo "Disabling IPv6 in UFW automatically to prevent system errors..."
-    sed -i 's/IPV6=yes/IPV6=no/' /etc/default/ufw
-fi
-
-# UFW No Ping
-echo
-echo "=== NoPing in UFW Setup ==="
-if [ -f /etc/ufw/before.rules ]; then
-    sed -i 's/-A ufw-before-input -p icmp --icmp-type echo-request -j ACCEPT/-A ufw-before-input -p icmp --icmp-type echo-request -j DROP/g' /etc/ufw/before.rules
-    sed -i 's/-A ufw-before-forward -p icmp --icmp-type echo-request -j ACCEPT/-A ufw-before-forward -p icmp --icmp-type echo-request -j DROP/g' /etc/ufw/before.rules
-    
-    if ! grep -Fq "source-quench -j DROP" /etc/ufw/before.rules; then
-        sed -i '/-A ufw-before-input -p icmp --icmp-type echo-request -j DROP/a -A ufw-before-input -p icmp --icmp-type source-quench -j DROP' /etc/ufw/before.rules
-        echo "Done, source-quench row added"
-    else
-        echo "Source-quench rule already exists, skipping."
-    fi
-fi
-
-if [ -f /etc/ufw/before6.rules ]; then
-    sed -i 's/-A ufw-before-input -p icmpv6 --icmp-type echo-request -j ACCEPT/-A ufw-before-input -p icmpv6 --icmp-type echo-request -j DROP/g' /etc/ufw/before6.rules
-    sed -i 's/-A ufw-before-forward -p icmpv6 --icmp-type echo-request -j ACCEPT/-A ufw-before-forward -p icmpv6 --icmp-type echo-request -j DROP/g' /etc/ufw/before6.rules
-fi
-echo "Success"
-
-# SSH-port configure
-echo
-echo "=== Configuring SSH Port ==="
-if [ -z "$SSH_PORT" ]; then
-    SSH_PORT=$(grep -E "^Port [0-9]+" /etc/ssh/sshd_config | awk '{print $2}')
-    [ -z "$SSH_PORT" ] && SSH_PORT=22
-fi
-echo "Target SSH Port: $SSH_PORT"
-
-# 1. Меняем порт в классическом конфиге
-sed -i "s/^#\?Port .*/Port $SSH_PORT/" /etc/ssh/sshd_config
-rm -f /etc/ssh/sshd_config.d/*.conf || true
-mkdir -p /run/sshd
-
-# 2. Перенастройка системного сокета под новый порт (для современных Ubuntu)
-if systemctl list-units --type=socket | grep -q "ssh.socket"; then
-    echo "Modern systemd socket-activation detected. Adjusting SSH socket..."
-    mkdir -p /etc/systemd/system/ssh.socket.d
-    cat > /etc/systemd/system/ssh.socket.d/listen.conf <<EOF
-[Socket]
-ListenStream=
-ListenStream=$SSH_PORT
-EOF
-fi
-
-# 3. Перезапускаем SSH-службу
-if sshd -t; then
-    echo "SSH configuration syntax is OK. Restarting services..."
-    systemctl daemon-reload
-    if systemctl is-active --quiet ssh.socket; then
-        systemctl stop ssh.socket >/dev/null 2>&1 || true
-        systemctl stop ssh >/dev/null 2>&1 || true
-        systemctl start ssh.socket >/dev/null 2>&1 || true
-        systemctl start ssh >/dev/null 2>&1 || true
-    else
-        systemctl restart sshd || systemctl restart ssh || true
-    fi
-else
-    echo "Warning: SSH configuration test failed! Reverting port changes."
-    sed -i "s/^Port .*/Port 22/" /etc/ssh/sshd_config
-    rm -rf /etc/systemd/system/ssh.socket.d
-    systemctl daemon-reload
-    systemctl restart sshd || systemctl restart ssh || true
-fi
-
-echo "Updating firewall rules..."
-
-# ИСПРАВЛЕНИЕ: Переключаем систему на слой совместимости iptables-nft, чтобы убрать ошибку "problem running"
-if command -v update-alternatives >/dev/null 2>&1; then
-    sudo update-alternatives --set iptables /usr/sbin/iptables-nft >/dev/null 2>&1 || true
-    sudo update-alternatives --set ip6tables /usr/sbin/ip6tables-nft >/dev/null 2>&1 || true
-fi
-
-# Принудительно выключаем UFW перед правками, чтобы полностью сбросить заклинившие таблицы ядра
-sudo ufw disable >/dev/null 2>&1 || true
-
-# Добавляем правила (флаг --force предотвратит интерактивные вопросы и обрывы потока Bash)
-sudo ufw --force allow "$SSH_PORT"/tcp comment 'SSH Custom Port' >/dev/null 2>&1 || true
-sudo ufw --force allow 443/tcp comment 'VLESS Reality Port' >/dev/null 2>&1 || true
-
-# Автоматически находим порт веб-интерфейса вашей панели 3x-ui и открываем его в UFW
-if [ -f /etc/x-ui/x-ui.db ]; then
-    XUI_PORT=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webPort';" 2>/dev/null)
-    if [ -n "$XUI_PORT" ]; then
-        sudo ufw --force allow "$XUI_PORT"/tcp comment '3x-ui Web Panel' >/dev/null 2>&1 || true
-    fi
-fi
-
-echo "Safely applying firewall rules..."
-# Включаем фаервол чистым запуском. Теперь он поднимется без ошибок!
-sudo ufw --force enable >/dev/null 2>&1 || true
-
-echo -e "\n=== Final Firewall Status ==="
-sudo ufw status | cat
-
-# Auto Security Updates
-echo
-echo "=== Enabling Auto Security Updates Setup ==="
-echo "Checking for background package managers..."
-while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do 
-    echo -n "." 
-    sleep 3
-done
-echo " Package manager is free. Proceeding..."
-apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" install unattended-upgrades -y
-tee /etc/apt/apt.conf.d/20auto-upgrades > /dev/null <<EOT
-APT::Periodic::Update-Package-Lists "1";
-APT::Periodic::Unattended-Upgrade "1";
-EOT
-echo "Done"
-
-# SSH Tunnel and SFTP User Configuration
-echo
-echo "=== SSH Tunnel & SFTP User Configuration ==="
-    USERNAME="sshtunneluser"
-while true; do
-    echo "Do you want to create a secure SSH Tunnel + SFTP user ($USERNAME)? (y/n) [Default: n]"
-    read -p "Your choice: " TUNNEL_USER_INPUT
-    if [ -z "$TUNNEL_USER_INPUT" ]; then
-        TUNNEL_USER_INPUT="n"
-        echo -e "\e[1A\e[KYour choice: n"
-    fi
-    if [ "${TUNNEL_USER_INPUT,,}" = "y" ] || [ "${TUNNEL_USER_INPUT,,}" = "yes" ]; then
-        CREATE_TUNNEL_USER=true
-        echo "Proceeding to configure secure user..."
-        break
-    elif [ "${TUNNEL_USER_INPUT,,}" = "n" ] || [ "${TUNNEL_USER_INPUT,,}" = "no" ]; then
-        CREATE_TUNNEL_USER=false
-        echo "Skipping SSH Tunnel + SFTP user setup."
+        ENABLE_DOT=false
+        echo "Skipping DNS over TLS setup."
         break
     else
         echo -e "Error: Invalid input. Please enter 'y' or 'n'\n"
     fi
 done
-if [ "$CREATE_TUNNEL_USER" = true ]; then
-    if id "$USERNAME" &>/dev/null; then
-      echo "User '$USERNAME' already exists. Skipping creation."
-    else
-      echo "Creating user '$USERNAME' (Passwordless & Silent)..."
-      useradd -m -s /bin/bash -p '!' "$USERNAME"
-      echo "User successfully created."
+if [ "$ENABLE_DOT" = true ]; then
+    while true; do
+        echo
+        echo "Select DNS provider:"
+        echo "  1) Quad9 (Privacy) [Default]"
+        echo "  2) Cloudflare (Speed)"
+        echo "  3) Google (Stability)"
+        echo "  4) Yandex (Good for RU segment, Basic filtering)"
+        echo "  5) Google + Cloudflare (Max Stability & Speed)"
+        echo "  6) Quad9 + Cloudflare (Max Privacy & Speed)"
+        read -p "Your choice (1-6): " DNS_CHOICE
+        if [ -z "$DNS_CHOICE" ]; then
+            DNS_CHOICE="1"
+            echo -e "\e[1A\e[KYour choice (1-6): 1"
+        fi
+        DNSSEC_POLICY="yes"
+        case "$DNS_CHOICE" in
+            1)
+                DNS_SERVERS="9.9.9.9 149.112.112.112"
+                PROVIDER_NAME="Quad9"
+                break
+                ;;
+            2)
+                DNS_SERVERS="1.1.1.1 1.0.0.1"
+                PROVIDER_NAME="Cloudflare"
+                break
+                ;;
+            3)
+                DNS_SERVERS="8.8.8.8 8.8.4.4"
+                PROVIDER_NAME="Google"
+                break
+                ;;
+            4)
+                DNS_SERVERS="77.88.8.8 77.88.8.1"
+                PROVIDER_NAME="Yandex"
+                DNSSEC_POLICY="allow-downgrade"
+                break
+                ;;
+            5)
+                DNS_SERVERS="8.8.8.8 1.1.1.1 8.8.4.4 1.0.0.1"
+                PROVIDER_NAME="Google + Cloudflare"
+                break
+                ;;
+            6)
+                DNS_SERVERS="9.9.9.9 1.1.1.1 149.112.112.112 1.0.0.1"
+                PROVIDER_NAME="Quad9 + Cloudflare"
+                break
+                ;;
+            *)
+                echo "Error: Invalid choice. Please enter a number between 1 and 6."
+                ;;
+        esac
+    done
+    echo "Configuring $PROVIDER_NAME DNS over TLS (DNSSEC: $DNSSEC_POLICY)..."
+    sudo rm -f /etc/systemd/resolved.conf.d/*.conf || true
+    sudo mkdir -p /etc/systemd/resolved.conf.d
+    sudo tee /etc/systemd/resolved.conf.d/dot-custom.conf > /dev/null <<EOT
+[Resolve]
+DNS=$DNS_SERVERS
+Domains=~.
+DNSOverTLS=yes
+DNSSEC=$DNSSEC_POLICY
+EOT
+    sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+    sudo systemctl daemon-reload
+    sudo systemctl restart systemd-resolved
+    NET_INT=$(ip route | grep default | awk '{print $5}')
+    if [ -n "$NET_INT" ]; then
+        sudo resolvectl dns "$NET_INT" ""
+        sudo resolvectl domain "$NET_INT" ""
     fi
-    echo "Configuring Chroot permissions for home directory..."
-    chown root:root "/home/$USERNAME"
-    chmod 755 "/home/$USERNAME"
-    SSH_DIR="/home/$USERNAME/.ssh"
-    if [ ! -d "$SSH_DIR" ]; then
-      echo "Creating directory $SSH_DIR..."
-      mkdir -p "$SSH_DIR"
-    fi
-    if [ -f "$SSH_DIR/authorized_keys" ] || (compgen -G "$SSH_DIR/*.pub" >/dev/null 2>&1 || false); then
-      echo "authorized_keys or a public key (*.pub) already exists. Skipping key generation."
-    else
-      echo "No keys or authorized_keys found. Generating new Ed25519 key..."
-      rm -f "$SSH_DIR/id_ed25519" 2>/dev/null || true
-      ssh-keygen -t ed25519 -a 100 -N "" -C "sshtunneluser@identificator" -f "$SSH_DIR/id_ed25519"
-      cat "$SSH_DIR/id_ed25519.pub" >> "$SSH_DIR/authorized_keys"
-      echo "SSH key successfully generated and added to authorized_keys."
-    fi
-    chown -R "$USERNAME:$USERNAME" "$SSH_DIR"
-    chmod 700 "$SSH_DIR"
-    if [ -f "$SSH_DIR/authorized_keys" ]; then chmod 600 "$SSH_DIR/authorized_keys"; fi
-    find "$SSH_DIR" -type f ! -name "*.pub" ! -name "authorized_keys" -exec chmod 600 {} + 2>/dev/null || true
-    find "$SSH_DIR" -type f -name "*.pub" -exec chmod 644 {} + 2>/dev/null || true
-    SFTP_DIR="/home/$USERNAME/Download"
-    if [ ! -d "$SFTP_DIR" ]; then
-      echo "Creating 'Download' directory for SFTP..."
-      mkdir -p "$SFTP_DIR"
-    fi
-    chown "$USERNAME:$USERNAME" "$SFTP_DIR"
-    chmod 755 "$SFTP_DIR"
-    SSHD_CONFIG="/etc/ssh/sshd_config"
-    sed -i '/# === BEGIN SSHTUNNELUSER BLOCK ===/,/# === END SSHTUNNELUSER BLOCK ===/d' "$SSHD_CONFIG"
-    echo "Adding security restrictions (Tunnel + SFTP) to $SSHD_CONFIG..."
-    tee -a "$SSHD_CONFIG" > /dev/null << 'EOF'
-# === BEGIN SSHTUNNELUSER BLOCK ===
-Match User sshtunneluser
-    AllowTcpForwarding yes
-    X11Forwarding no
-    PermitTTY no
-    PasswordAuthentication no
-    ChrootDirectory /home/sshtunneluser
-    ForceCommand internal-sftp
-# === END SSHTUNNELUSER BLOCK ===
-EOF
-    echo "Checking SSH configuration for syntax errors..."
-    mkdir -p /run/sshd
-    if ! sshd -t; then
-      echo "Error: Syntax errors found in $SSHD_CONFIG! Reverting changes..."
-      sed -i '/# === BEGIN SSHTUNNELUSER BLOCK ===/,/# === END SSHTUNNELUSER BLOCK ===/d' "$SSHD_CONFIG"
-      exit 1
-    fi
-    echo "Restarting SSH service..."
-    if systemctl is-active --quiet sshd; then
-      systemctl restart sshd
-    elif systemctl is-active --quiet ssh; then
-      systemctl restart ssh
-    else
-      echo "Warning: Could not determine SSH service name."
-    fi
-    echo
-    echo "=== Configuration successfully completed! ==="
-    echo "User '$USERNAME' can now use BOTH SSH Tunneling and SFTP."
-    echo "Terminal login is securely BLOCKED."
-    echo "------------------------------------------------------------"
-    PRIVATE_KEY_FILE=$(find "$SSH_DIR" -type f ! -name "*.pub" ! -name "authorized_keys" | head -n 1)
-    if [ -n "$PRIVATE_KEY_FILE" ] && [ -f "$PRIVATE_KEY_FILE" ]; then
-        KEY_NAME=$(basename "$PRIVATE_KEY_FILE")
-        trap 'rm -f "$PRIVATE_KEY_FILE"; echo -e "\n\n✅ [TRAP] Private key file ($KEY_NAME) permanently deleted due to script interruption."; exit' INT TERM EXIT
-        echo "🔑 YOUR PRIVATE SSH KEY ($KEY_NAME):"
-        echo "------------------------------------------------------------"
-        cat "$PRIVATE_KEY_FILE"
-        echo "------------------------------------------------------------"
-        echo "⚠️ CRITICAL SECURITY WARNING:"
-        echo "Copy the key text above right now into your client device."
-        echo "Once you press Enter (or press Ctrl+C), this private key will be PERMANENTLY deleted."
-        echo "------------------------------------------------------------"
-        read -p "Press [Enter] after you have copied the key to delete it safely..."
-        rm -f "$PRIVATE_KEY_FILE"
-        echo "✅ Private key file '$KEY_NAME' has been safely deleted from the VPS."
-        trap - INT TERM EXIT
-    else
-        echo "ℹ️ Note: No new private key file found on the server (already deleted or skipped)."
-    fi
-    echo "------------------------------------------------------------"
 fi
+resolvectl status
 
-# Cleaning Service
+# SSH && UFW
+sudo sed -i 's/IPV6=yes/IPV6=no/' /etc/default/ufw
+# UFW No Ping
+echo
+echo "=== NoPing in UFW Setup ==="
+# Change ACCEPT to DROP for all rules INPUT and FORWARD in sections icmp
+sudo sed -i '/-A ufw-before-input -p icmp/s/ACCEPT/DROP/g' /etc/ufw/before.rules
+sudo sed -i '/-A ufw-before-forward -p icmp/s/ACCEPT/DROP/g' /etc/ufw/before.rules
+# Add new row for source-quench before rule forward
+if ! grep -q "source-quench -j DROP" /etc/ufw/before.rules; then
+    sudo sed -i '/-A ufw-before-input -p icmp --icmp-type echo-request -j DROP/a -A ufw-before-input -p icmp --icmp-type source-quench -j DROP' /etc/ufw/before.rules && echo "Done, row added"
+fi
+echo "Succes"
+# SSH-port configure
+echo
+echo "=== Configuring SSH Port ==="
+# Find row "#Port 22" and change on $SSH_PORT
+sudo sed -i "s/^#\?Port .*/Port $SSH_PORT/" /etc/ssh/sshd_config
+sudo rm -f /etc/ssh/sshd_config.d/*.conf || true
+sudo mkdir -p /run/sshd
+sudo sshd -t
+sudo systemctl daemon-reload
+sudo systemctl restart ssh.socket ssh.service || sudo systemctl restart ssh
+#
+if [ "$CURRENT_PORT" -ne "$SSH_PORT" ]; then
+    sudo ufw delete allow $CURRENT_PORT/tcp || true
+fi
+# ALWAYS open $SSH_PORT and 443
+sudo ufw allow $SSH_PORT/tcp
+sudo ufw allow 443/tcp
+sudo ufw --force enable && sudo ufw status numbered || true
+
+# Auto Security Updates
+echo
+echo "=== Enabling Auto Security Updates Setup ==="
+sudo apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" install unattended-upgrades -y
+sudo tee /etc/apt/apt.conf.d/20auto-upgrades > /dev/null <<EOT
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+EOT
+echo "Done"
+
+# Cleaning Servise
 echo
 echo "=== Cleaning Service & Deep Disk Cleanup ==="
-if [ -f /swap.img ]; then 
-    echo "Found old /swap.img. Deactivating and removing..." 
-    swapoff /swap.img 2>/dev/null || true 
-    rm -f /swap.img 
-    sed -i '\/swap.img/d' /etc/fstab
+if [ -f /swap.img ]; then
+    echo "Found old /swap.img. Deactivating and removing..."
+    sudo swapoff /swap.img 2>/dev/null || true
+    sudo rm -f /swap.img
+    sudo sed -i '\/swap.img/d' /etc/fstab
 fi
-
-if command -v journalctl >/dev/null 2>&1; then 
-    echo "Vacuuming systemd journal logs to 100M..." 
-    journalctl --vacuum-size=100M >/dev/null 2>&1 || true
+if command -v journalctl >/dev/null 2>&1; then
+    echo "Vacuuming systemd journal logs to 100M..."
+    sudo journalctl --vacuum-size=100M >/dev/null 2>&1 || true
 fi
-
 echo "Clearing heavy system logs..."
-truncate -s 0 /var/log/syslog 2>/dev/null || true
-rm -f /var/log/syslog.1 2>/dev/null || true
-rm -f /var/log/syslog.*.gz 2>/dev/null || true
-
-echo "Configuring custom logrotate policy for syslog..."
-tee /etc/logrotate.d/syslog-custom > /dev/null << 'EOF'
-/var/log/syslog { 
-    daily 
-    rotate 2 
-    maxsize 50M 
-    missingok 
-    notifempty 
-    delaycompress 
-    compress 
-    postrotate 
-        /usr/lib/rsyslog/rsyslog-rotate 
-    endscript
-}
-EOF
-
-if command -v docker >/dev/null 2>&1; then 
-    echo "Cleaning unused Docker resources..." 
-    docker system prune -f >/dev/null 2>&1 || true
+sudo truncate -s 0 /var/log/syslog 2>/dev/null || true
+sudo rm -f /var/log/syslog.1 2>/dev/null || true
+sudo rm -f /var/log/syslog.*.gz 2>/dev/null || true
+if [ -f /etc/logrotate.d/rsyslog ]; then
+    echo "Optimizing logrotate configuration for syslog..."
+    sudo sed -i 's/weekly/daily\n        maxsize 50M/' /etc/logrotate.d/rsyslog
+    sudo sed -i 's/rotate 4/rotate 2/' /etc/logrotate.d/rsyslog
+    sudo sed -i 's/rotate 7/rotate 2/' /etc/logrotate.d/rsyslog
 fi
-
+if command -v docker >/dev/null 2>&1; then
+    echo "Cleaning unused Docker resources..."
+    sudo docker system prune -f >/dev/null 2>&1 || true
+fi
 echo "Running APT package cleanup..."
-apt-get autoclean -y
-apt-get autoremove --purge -y
-apt-get clean -y
+sudo apt-get autoclean -y
+sudo apt-get autoremove --purge -y
+sudo apt-get clean -y
 echo "Cleared"
 echo
 df -h /
