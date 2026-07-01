@@ -207,7 +207,9 @@ while true; do
             break
             ;;
         *)
-            echo "Error: Invalid choice. Try again."
+            echo -e "\e[1A\e[KError: Invalid choice. Try again."
+            sleep 1
+            echo -e "\e[1A\e[K"
             ;;
     esac
 done
@@ -229,99 +231,56 @@ while true; do
         DNS_FINAL="$DNS_IPS"
         break
     else
-        echo -e "Error: Invalid input. Please enter 'y' or 'n'"
+        echo -e "\e[1A\e[KError: Invalid input. Please enter 'y' or 'n'"
+        sleep 1
+        echo -e "\e[1A\e[K"
     fi
 done
 
-echo "Configuring $PROVIDER_NAME (DNS over TLS: $ENABLE_DOT)..."
+echo "Configuring global $PROVIDER_NAME (DNS over TLS: $ENABLE_DOT)..."
 
-# 1. Удаляем статические DNS из Netplan (если есть)
-NETPLAN_FILE=$(ls /etc/netplan/*.yaml 2>/dev/null | head -n 1)
-if [ -n "$NETPLAN_FILE" ] && [ -f "$NETPLAN_FILE" ]; then
-    echo "Checking Netplan file $NETPLAN_FILE for static nameservers..."
-    if grep -q "nameservers:" "$NETPLAN_FILE" && grep -q "addresses:" "$NETPLAN_FILE"; then
-        echo "Removing static DNS entries from Netplan (will use systemd-resolved instead)."
-        sed -i '/^[[:space:]]*nameservers:/d; /^[[:space:]]*addresses:/d; /^[[:space:]]*- [0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/d' "$NETPLAN_FILE"
-        netplan apply >/dev/null 2>&1 || true
-        echo "Netplan updated."
-    fi
-fi
-
-# 2. Настройка systemd-resolved (глобально)
 if systemctl list-unit-files | grep -q "systemd-resolved"; then
-    rm -f /etc/systemd/resolved.conf.d/dot-custom.conf 2>/dev/null || true
+    # Полностью вычищаем старые кастомные конфиги resolved, если они были
+    rm -f /etc/systemd/resolved.conf.d/*.conf 2>/dev/null || true
     mkdir -p /etc/systemd/resolved.conf.d
     
+    # Записываем монументальную и чистую конфигурацию
     cat > /etc/systemd/resolved.conf.d/dot-custom.conf <<EOF
 [Resolve]
 DNS=$DNS_FINAL
 DNSOverTLS=$ENABLE_DOT
 DNSSEC=no
+Domains=~.
 FallbackDNS=8.8.8.8 1.1.1.1
 EOF
 
+    # Перезапускаем глобальный резолвер
     systemctl daemon-reload
     systemctl enable systemd-resolved --now 2>/dev/null || true
     systemctl restart systemd-resolved || true
     
+    # Сбрасываем старые привязки на интерфейсах, чтобы вычистить «мусор»
+    INTERFACE_NAME=$(ip -4 route show default | awk '{print $5}' | head -n 1)
+    if [ -n "$INTERFACE_NAME" ]; then
+        resolvectl revert "$INTERFACE_NAME" 2>/dev/null || true
+    fi
+
+    # Перенаправляем классический resolv.conf на stub-резолвер systemd
     if [ -f /run/systemd/resolve/stub-resolv.conf ]; then
         ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
     fi
-
-    # 3. Привязываем DNS к активному интерфейсу
-    INTERFACE_NAME=$(ip -4 route show default | awk '{print $5}' | head -n 1)
-    if [ -n "$INTERFACE_NAME" ]; then
-        echo "Setting DNS on interface $INTERFACE_NAME via resolvectl..."
-        # Если включён DoT, используем DNS_DOT_SERVERS, иначе DNS_IPS
-        if [ "$ENABLE_DOT" = "yes" ]; then
-            resolvectl dns "$INTERFACE_NAME" $DNS_DOT_SERVERS 2>/dev/null || true
-        else
-            resolvectl dns "$INTERFACE_NAME" $DNS_IPS 2>/dev/null || true
-        fi
-        resolvectl domain "$INTERFACE_NAME" "~." 2>/dev/null || true
-        resolvectl default-route "$INTERFACE_NAME" true 2>/dev/null || true
-        # Включаем DoT на интерфейсе (команда без дефиса)
-        if [ "$ENABLE_DOT" = "yes" ]; then
-            resolvectl dnsovertls "$INTERFACE_NAME" yes 2>/dev/null || true
-        fi
-    fi
-
-    # 4. Разрешаем локальный доступ к stub-резолверу в iptables (если политика DROP)
-    if command -v iptables >/dev/null 2>&1; then
-        if ! iptables -C INPUT -s 127.0.0.53 -j ACCEPT 2>/dev/null; then
-            iptables -I INPUT -s 127.0.0.53 -j ACCEPT
-            iptables -I OUTPUT -d 127.0.0.53 -j ACCEPT
-            echo "iptables rules added for local DNS resolver."
-        fi
-    fi
-
-    # 5. Очистка кэша
+    
+    # Очищаем кэш оперативной памяти
     resolvectl flush-caches 2>/dev/null || true
-
+    
     echo -e "\n=== Verification ==="
     resolvectl status
-
+    
     echo -e "\n=== DNS Connectivity Test ==="
-    # Проверка через dig или nslookup
-    if command -v dig >/dev/null 2>&1; then
-        if dig @127.0.0.53 "$TEST_DOMAIN" +short | grep -qE '^[0-9]'; then
-            echo "DNS Status: OK ($TEST_DOMAIN resolved successfully)."
-        else
-            echo "DNS Status: WARNING ($TEST_DOMAIN not resolved)."
-        fi
-    elif command -v nslookup >/dev/null 2>&1; then
-        if nslookup "$TEST_DOMAIN" 127.0.0.53 2>/dev/null | grep -q "Address:"; then
-            echo "DNS Status: OK ($TEST_DOMAIN resolved successfully)."
-        else
-            echo "DNS Status: WARNING ($TEST_DOMAIN not resolved)."
-        fi
+    if ping -c 2 -W 3 "$TEST_DOMAIN" >/dev/null 2>&1; then
+        echo "DNS Status: OK (Domain successfully resolved and reachable)."
     else
-        # fallback – ping (может быть заблокирован)
-        if ping -c 2 -W 3 "$TEST_DOMAIN" >/dev/null 2>&1; then
-            echo "DNS Status: OK (Domain reachable via ping)."
-        else
-            echo "DNS Status: OK (assuming DNS works, but ping may be blocked)."
-        fi
+        echo "DNS Status: WARNING (Network might be unreachable, but DNS structure is applied)."
     fi
 else
     echo "Warning: systemd-resolved is not active. Configuring static /etc/resolv.conf..."
