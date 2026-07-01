@@ -169,7 +169,7 @@ echo "=== DNS Setup ==="
 # Автоматически определяем имя активного сетевого интерфейса (например, eth0 или ens3)
 INTERFACE_NAME=$(ip -4 route show default | awk '{print $5}' | head -n 1)
 if [ -z "$INTERFACE_NAME" ]; then
-    INTERFACE_NAME="eth0" # Фолбэк, если не удалось определить
+    INTERFACE_NAME="eth0"
 fi
 
 while true; do
@@ -181,6 +181,7 @@ while true; do
     read -p "Your choice (1-4): " DNS_CHOICE
     if [ -z "$DNS_CHOICE" ]; then
         DNS_CHOICE="1"
+        # Очищаем строку ввода и пишем дефолт
         echo -e "\e[1A\e[KYour choice (1-4): 1"
     fi
     case "$DNS_CHOICE" in
@@ -213,7 +214,10 @@ while true; do
             break
             ;;
         *)
-            echo "Error: Invalid choice. Please enter a number between 1 and 4."
+            # Чистим ошибочный ввод, чтобы меню не дублировалось на весь экран
+            echo -e "\e[1A\e[KError: Invalid choice. Try again."
+            sleep 1
+            echo -e "\e[1A\e[K"
             ;;
     esac
 done
@@ -235,7 +239,9 @@ while true; do
         DNS_RESOLVED_SERVERS="$DNS_IPS"
         break
     else
-        echo -e "Error: Invalid input. Please enter 'y' or 'n'\n"
+        echo -e "\e[1A\e[KError: Invalid input. Please enter 'y' or 'n'"
+        sleep 1
+        echo -e "\e[1A\e[K"
     fi
 done
 
@@ -245,22 +251,21 @@ echo "Configuring $PROVIDER_NAME (DNS over TLS: $ENABLE_DOT) on interface $INTER
 NETPLAN_FILE=$(ls /etc/netplan/*.yaml 2>/dev/null | head -n 1)
 if [ -n "$NETPLAN_FILE" ] && [ -f "$NETPLAN_FILE" ]; then
     echo "Updating Netplan configuration in $NETPLAN_FILE..."
-    # Создаем бэкап перед изменением
     cp "$NETPLAN_FILE" "${NETPLAN_FILE}.bak_dns"
     
-    # ЮВЕЛИРНОЕ ИСПРАВЛЕНИЕ: Удаляем только блок nameservers, dns-addresses и дефисы с IP.
+    # Удаляем старый блок nameservers (ориентируясь строго на 6 пробелов перед addresses)
     sed -i '/nameservers:/d; /^[[:space:]]\{6\}addresses:/d; /^[[:space:]]*- [0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/d' "$NETPLAN_FILE"
     
-    # ИСПРАВЛЕНИЕ СИНТАКСИСА: Безопасное формирование структуры YAML без ломающих кавычек
+    # Генерируем новые строки без ломающего Bash экранирования
     YAML_IPS=""
     for ip in $DNS_IPS; do
         YAML_IPS="${YAML_IPS}        - ${ip}\n"
     fi
+    CLEAN_YAML=$(echo -e "$YAML_IPS" | sed 's/\n$//')
     
-    # Внедряем чистые IP-адреса DNS строго после матчинга интерфейса
-    sed -i "/$INTERFACE_NAME:/a\      nameservers:\n        addresses:\n$(echo -e "$YAML_IPS" | sed 's/\n$//')" "$NETPLAN_FILE"
+    # Вставляем блок под интерфейс
+    sed -i "/$INTERFACE_NAME:/a\      nameservers:\n        addresses:\n$CLEAN_YAML" "$NETPLAN_FILE"
     
-    # Применяем настройки сети Netplan
     netplan apply >/dev/null 2>&1 || true
 fi
 
@@ -332,7 +337,9 @@ if [ -f /proc/net/if_inet6 ]; then
             sed -i 's/IPV6=no/IPV6=yes/' /etc/default/ufw
             break
         else
-            echo -e "Error: Invalid input. Please enter 'y' or 'n'\n"
+            echo -e "\e[1A\e[KError: Invalid input. Please enter 'y' or 'n'"
+            sleep 1
+            echo -e "\e[1A\e[K"
         fi
     done
 else
