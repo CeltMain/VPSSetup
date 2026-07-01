@@ -154,7 +154,7 @@ fi
 echo
 free -h
 
-# DNS over TLS
+# DNS over TLS (Safe and Lightweight)
 echo
 echo "=== DNS over TLS (DoT) Setup ==="
 while true; do
@@ -176,60 +176,60 @@ while true; do
         echo -e "Error: Invalid input. Please enter 'y' or 'n'\n"
     fi
 done
+
 if [ "$ENABLE_DOT" = true ]; then
     while true; do
         echo
         echo "Select DNS provider:"
-        echo "  1) Quad9 (Privacy) [Default]"
-        echo "  2) Cloudflare (Speed)"
-        echo "  3) Google (Stability)"
-        echo "  4) Yandex (Good for RU segment, Basic filtering)"
-        echo "  5) Google + Cloudflare (Max Stability & Speed)"
-        echo "  6) Quad9 + Cloudflare (Max Privacy & Speed)"
-        read -p "Your choice (1-6): " DNS_CHOICE
+        echo "  1) Google"
+        echo "  2) Yandex (Good for RU segment)"
+        echo "  3) Quad9"
+        echo "  4) Cloudflare"
+        read -p "Your choice (1-4) [Default: 1]: " DNS_CHOICE
         if [ -z "$DNS_CHOICE" ]; then
             DNS_CHOICE="1"
-            echo -e "\e[1A\e[KYour choice (1-6): 1"
+            echo -e "\e[1A\e[KYour choice (1-4): 1"
         fi
+        
+        # По умолчанию для всех ставим строгую политику DNSSEC
         DNSSEC_POLICY="yes"
+        
         case "$DNS_CHOICE" in
             1)
-                DNS_SERVERS="9.9.9.9 149.112.112.112"
-                PROVIDER_NAME="Quad9"
-                break
-                ;;
-            2)
-                DNS_SERVERS="1.1.1.1 1.0.0.1"
-                PROVIDER_NAME="Cloudflare"
-                break
-                ;;
-            3)
                 DNS_SERVERS="8.8.8.8 8.8.4.4"
                 PROVIDER_NAME="Google"
                 break
                 ;;
-            4)
+            2)
                 DNS_SERVERS="77.88.8.8 77.88.8.1"
                 PROVIDER_NAME="Yandex"
-                DNSSEC_POLICY="allow-downgrade"
+                DNSSEC_POLICY="allow-downgrade" # Для Яндекса лучше мягкий режим
                 break
                 ;;
-            5)
-                DNS_SERVERS="8.8.8.8 1.1.1.1 8.8.4.4 1.0.0.1"
-                PROVIDER_NAME="Google + Cloudflare"
+            3)
+                DNS_SERVERS="9.9.9.9 149.112.112.112"
+                PROVIDER_NAME="Quad9"
                 break
                 ;;
-            6)
-                DNS_SERVERS="9.9.9.9 1.1.1.1 149.112.112.112 1.0.0.1"
-                PROVIDER_NAME="Quad9 + Cloudflare"
+            4)
+                DNS_SERVERS="1.1.1.1 1.0.0.1"
+                PROVIDER_NAME="Cloudflare"
                 break
                 ;;
             *)
-                echo "Error: Invalid choice. Please enter a number between 1 and 6."
+                echo "Error: Invalid choice. Please enter a number between 1 and 4."
                 ;;
         esac
     done
+
     echo "Configuring $PROVIDER_NAME DNS over TLS (DNSSEC: $DNSSEC_POLICY)..."
+    
+    # 1. Безопасно бэкапим текущий resolv.conf на случай полного отката
+    if [ ! -f /etc/resolv.conf.bak ]; then
+        sudo cp /etc/resolv.conf /etc/resolv.conf.bak 2>/dev/null || true
+    fi
+
+    # 2. Создаем чистую конфигурацию
     sudo rm -f /etc/systemd/resolved.conf.d/*.conf || true
     sudo mkdir -p /etc/systemd/resolved.conf.d
     sudo tee /etc/systemd/resolved.conf.d/dot-custom.conf > /dev/null <<EOT
@@ -239,15 +239,53 @@ Domains=~.
 DNSOverTLS=yes
 DNSSEC=$DNSSEC_POLICY
 EOT
+
+    # Применяем настройки
     sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
     sudo systemctl daemon-reload
     sudo systemctl restart systemd-resolved
-    NET_INT=$(ip route | grep default | awk '{print $5}')
+
+    # Сбрасываем динамические DNS от DHCP на основном интерфейсе, чтобы они не мешали DoT
+    NET_INT=$(ip route | grep default | awk '{print $5}' | head -n 1)
     if [ -n "$NET_INT" ]; then
-        sudo resolvectl dns "$NET_INT" ""
-        sudo resolvectl domain "$NET_INT" ""
+        sudo resolvectl dns "$NET_INT" "" 2>/dev/null || true
+        sudo resolvectl domain "$NET_INT" "" 2>/dev/null || true
+    fi
+
+    # === БЛОК ПРОВЕРКИ И ЗАЩИТЫ ОТ БЛОКИРОВОК/ПЕРЕХВАТА ===
+    echo "Verifying DoT connection integrity..."
+    sleep 2 # Даем пару секунд на установку TLS-сессии
+
+    # Пробуем разрешить тестовый домен строго через настроенные параметры
+    if resolvectl query google.com >/dev/null 2>&1; then
+        # Дополнительная проверка: действительно ли работает именно TLS-режим
+        if resolvectl status | grep -E "Protocols:" | grep -q "+DoT"; then
+            echo "Success! DNS over TLS is fully operational."
+        else
+            # Если запрос прошел, но DoT флаг не активен, возможно идет перехват или откат
+            echo "Warning: Connection is alive, but DoT status is unverified."
+        fi
+    else
+        echo "ALERT: DoT handshake failed or connection is intercepted/blocked!"
+        echo "Rolling back to default hoster DNS immediately for safety..."
+        
+        # Откат: удаляем кастомный конфиг
+        sudo rm -f /etc/systemd/resolved.conf.d/dot-custom.conf
+        
+        # Возвращаем стандартный resolv.conf провайдера (если был бэкап) или перезапускаем сеть
+        if [ -f /etc/resolv.conf.bak ]; then
+            sudo cp /etc/resolv.conf.bak /etc/resolv.conf
+        else
+            sudo ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+        fi
+        
+        sudo systemctl daemon-reload
+        sudo systemctl restart systemd-resolved
+        echo "Rollback complete. System is safe."
     fi
 fi
+
+echo -e "\n=== Current DNS Status ==="
 resolvectl status
 
 # SSH && UFW
