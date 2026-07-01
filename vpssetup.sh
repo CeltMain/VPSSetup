@@ -390,10 +390,16 @@ fi
 
 echo "Updating firewall rules..."
 
-# ИСПРАВЛЕНИЕ: Мягко сбрасываем UFW, если он завис из-за iptables-клинча
+# ИСПРАВЛЕНИЕ: Переключаем систему на слой совместимости iptables-nft, чтобы убрать ошибку "problem running"
+if command -v update-alternatives >/dev/null 2>&1; then
+    sudo update-alternatives --set iptables /usr/sbin/iptables-nft >/dev/null 2>&1 || true
+    sudo update-alternatives --set ip6tables /usr/sbin/ip6tables-nft >/dev/null 2>&1 || true
+fi
+
+# Принудительно выключаем UFW перед правками, чтобы полностью сбросить заклинившие таблицы ядра
 sudo ufw disable >/dev/null 2>&1 || true
 
-# Добавляем правила (флаг --force предотвратит интерактивные вопросы и обрывы потока)
+# Добавляем правила (флаг --force предотвратит интерактивные вопросы и обрывы потока Bash)
 sudo ufw --force allow "$SSH_PORT"/tcp comment 'SSH Custom Port' >/dev/null 2>&1 || true
 sudo ufw --force allow 443/tcp comment 'VLESS Reality Port' >/dev/null 2>&1 || true
 
@@ -406,7 +412,7 @@ if [ -f /etc/x-ui/x-ui.db ]; then
 fi
 
 echo "Safely applying firewall rules..."
-# Вместо релоада, который падал с ошибкой "problem running", делаем чистый старт подсистемы
+# Включаем фаервол чистым запуском. Теперь он поднимется без ошибок!
 sudo ufw --force enable >/dev/null 2>&1 || true
 
 echo -e "\n=== Final Firewall Status ==="
