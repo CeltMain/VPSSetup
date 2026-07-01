@@ -272,7 +272,6 @@ EOF
     INTERFACE_NAME=$(ip -4 route show default | awk '{print $5}' | head -n 1)
     if [ -n "$INTERFACE_NAME" ]; then
         echo "Setting DNS on interface $INTERFACE_NAME via resolvectl..."
-        resolvectl dns "$INTERFACE_NAME" $DNS_IPS 2>/dev/null || true
         # Если включён DoT, используем DNS_DOT_SERVERS, иначе DNS_IPS
         if [ "$ENABLE_DOT" = "yes" ]; then
             resolvectl dns "$INTERFACE_NAME" $DNS_DOT_SERVERS 2>/dev/null || true
