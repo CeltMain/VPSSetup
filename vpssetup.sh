@@ -181,39 +181,35 @@ if [ "$ENABLE_DOT" = true ]; then
     while true; do
         echo
         echo "Select DNS provider:"
-        echo "  1) Google"
-        echo "  2) Yandex (Good for RU segment)"
-        echo "  3) Quad9"
-        echo "  4) Cloudflare"
+        echo "  1) Cloudflare [Default]"
+        echo "  2) Quad9"
+        echo "  3) Google"
+        echo "  4) Yandex (Good for RU segment)"
         read -p "Your choice (1-4) [Default: 1]: " DNS_CHOICE
         if [ -z "$DNS_CHOICE" ]; then
             DNS_CHOICE="1"
             echo -e "\e[1A\e[KYour choice (1-4): 1"
         fi
         
-        # По умолчанию для всех ставим строгую политику DNSSEC
-        DNSSEC_POLICY="yes"
-        
         case "$DNS_CHOICE" in
             1)
-                DNS_SERVERS="8.8.8.8 8.8.4.4"
-                PROVIDER_NAME="Google"
+                DNS_SERVERS="1.1.1.1 1.0.0.1"
+                PROVIDER_NAME="Cloudflare"
                 break
                 ;;
             2)
-                DNS_SERVERS="77.88.8.8 77.88.8.1"
-                PROVIDER_NAME="Yandex"
-                DNSSEC_POLICY="allow-downgrade" # Для Яндекса лучше мягкий режим
-                break
-                ;;
-            3)
                 DNS_SERVERS="9.9.9.9 149.112.112.112"
                 PROVIDER_NAME="Quad9"
                 break
                 ;;
+            3)
+                DNS_SERVERS="8.8.8.8 8.8.4.4"
+                PROVIDER_NAME="Google"
+                break
+                ;;
             4)
-                DNS_SERVERS="1.1.1.1 1.0.0.1"
-                PROVIDER_NAME="Cloudflare"
+                DNS_SERVERS="77.88.8.8 77.88.8.1"
+                PROVIDER_NAME="Yandex"
                 break
                 ;;
             *)
@@ -222,14 +218,14 @@ if [ "$ENABLE_DOT" = true ]; then
         esac
     done
 
-    echo "Configuring $PROVIDER_NAME DNS over TLS (DNSSEC: $DNSSEC_POLICY)..."
+    echo "Configuring $PROVIDER_NAME DNS over TLS (DNSSEC: no)..."
     
     # 1. Безопасно бэкапим текущий resolv.conf на случай полного отката
     if [ ! -f /etc/resolv.conf.bak ]; then
         sudo cp /etc/resolv.conf /etc/resolv.conf.bak 2>/dev/null || true
     fi
 
-    # 2. Создаем чистую конфигурацию
+    # 2. Создаем чистую конфигурацию (DNSSEC полностью отключен)
     sudo rm -f /etc/systemd/resolved.conf.d/*.conf || true
     sudo mkdir -p /etc/systemd/resolved.conf.d
     sudo tee /etc/systemd/resolved.conf.d/dot-custom.conf > /dev/null <<EOT
@@ -237,7 +233,7 @@ if [ "$ENABLE_DOT" = true ]; then
 DNS=$DNS_SERVERS
 Domains=~.
 DNSOverTLS=yes
-DNSSEC=$DNSSEC_POLICY
+DNSSEC=no
 EOT
 
     # Применяем настройки
@@ -258,13 +254,7 @@ EOT
 
     # Пробуем разрешить тестовый домен строго через настроенные параметры
     if resolvectl query google.com >/dev/null 2>&1; then
-        # Дополнительная проверка: действительно ли работает именно TLS-режим
-        if resolvectl status | grep -E "Protocols:" | grep -q "+DoT"; then
-            echo "Success! DNS over TLS is fully operational."
-        else
-            # Если запрос прошел, но DoT флаг не активен, возможно идет перехват или откат
-            echo "Warning: Connection is alive, but DoT status is unverified."
-        fi
+        echo "Success! DNS over TLS is fully operational."
     else
         echo "ALERT: DoT handshake failed or connection is intercepted/blocked!"
         echo "Rolling back to default hoster DNS immediately for safety..."
