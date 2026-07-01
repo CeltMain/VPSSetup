@@ -271,8 +271,6 @@ if [ -n "$NETPLAN_FILE" ] && [ -f "$NETPLAN_FILE" ]; then
     netplan apply >/dev/null 2>&1 || true
 fi
 
-fi
-
 # Шаг 2. Настройка глобального демона systemd-resolved
 if systemctl list-unit-files | grep -q "systemd-resolved"; then
     rm -f /etc/systemd/resolved.conf.d/dot-custom.conf || true
