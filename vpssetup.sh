@@ -249,19 +249,16 @@ if [ -n "$NETPLAN_FILE" ] && [ -f "$NETPLAN_FILE" ]; then
     cp "$NETPLAN_FILE" "${NETPLAN_FILE}.bak_dns"
     
     # ЮВЕЛИРНОЕ ИСПРАВЛЕНИЕ: Удаляем только блок nameservers, dns-addresses и дефисы с IP.
-    # [[:space:]]\{6\}addresses: гарантирует, что удалится только DNS-строка (с 6 пробелами), 
-    # а системный IP (с 4 пробелами) останется нетронутым.
     sed -i '/nameservers:/d; /^[[:space:]]\{6\}addresses:/d; /^[[:space:]]*- [0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/d' "$NETPLAN_FILE"
     
-    # Формируем массив новых IP для вставки в YAML с сохранением вашей структуры отступов (2 пробела)
+    # ИСПРАВЛЕНИЕ СИНТАКСИСА: Безопасное формирование структуры YAML без ломающих кавычек
     YAML_IPS=""
     for ip in $DNS_IPS; do
-        YAML_IPS="${YAML_IPS}        - $ip\n"
+        YAML_IPS="${YAML_IPS}        - ${ip}\n"
     fi
-    YAML_IPS=$(echo -e "$YAML_IPS" | sed 's/\n$//')
-
+    
     # Внедряем чистые IP-адреса DNS строго после матчинга интерфейса
-    sed -i "/$INTERFACE_NAME:/a\      nameservers:\n        addresses:\n$YAML_IPS" "$NETPLAN_FILE"
+    sed -i "/$INTERFACE_NAME:/a\      nameservers:\n        addresses:\n$(echo -e "$YAML_IPS" | sed 's/\n$//')" "$NETPLAN_FILE"
     
     # Применяем настройки сети Netplan
     netplan apply >/dev/null 2>&1 || true
@@ -288,7 +285,7 @@ EOT
         ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
     fi  
     
-    # Шаг 3. Фиксация DoT-хостов напрямую на сетевом интерфейсе (Лечит утечку Xray)
+    # Шаг 3. Фиксация DoT-хостов напрямую на сетевом интерфейсе
     if [ "$ENABLE_DOT" = "yes" ]; then
         resolvectl dns "$INTERFACE_NAME" $DNS_DOT_SERVERS >/dev/null 2>&1 || true
     else
