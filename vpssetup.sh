@@ -208,7 +208,7 @@ if [ "$ENABLE_DOT" = true ]; then
                 break
                 ;;
             4)
-                DNS_SERVERS="77.88.8.8#common.dot.yandex.net 77.88.8.1#common.dot.yandex.net"
+                DNS_SERVERS="77.88.8.8#common.dot.dns.yandex.net 77.88.8.1#common.dot.dns.yandex.net"
                 PROVIDER_NAME="Yandex"
                 break
                 ;;
