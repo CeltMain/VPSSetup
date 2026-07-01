@@ -332,6 +332,34 @@ else
     echo "Static resolv.conf configured."
 fi
 
+# SSH && UFW
+echo
+echo "=== IPv6 Configuration in UFW ==="
+if [ -f /proc/net/if_inet6 ]; then
+    while true; do
+        echo "Do you want to DISABLE IPv6 in UFW? (y/n) [Default: n]"
+        read -p "Your choice: " IPV6_INPUT
+        if [ -z "$IPV6_INPUT" ]; then
+            IPV6_INPUT="n"
+            echo -e "\e[1A\e[KYour choice: n"
+        fi
+        if [ "${IPV6_INPUT,,}" = "y" ] || [ "${IPV6_INPUT,,}" = "yes" ]; then
+            echo "Disabling IPv6 in UFW configuration..."
+            sed -i 's/IPV6=yes/IPV6=no/' /etc/default/ufw
+            break
+        elif [ "${IPV6_INPUT,,}" = "n" ] || [ "${IPV6_INPUT,,}" = "no" ]; then
+            echo "Keeping IPv6 enabled in UFW configuration."
+            sed -i 's/IPV6=no/IPV6=yes/' /etc/default/ufw
+            break
+        else
+            echo -e "Error: Invalid input. Please enter 'y' or 'n'\n"
+        fi
+    done
+else
+    echo "Notice: IPv6 is disabled or not supported by your host provider."
+    echo "Disabling IPv6 in UFW automatically to prevent system errors..."
+    sed -i 's/IPV6=yes/IPV6=no/' /etc/default/ufw
+fi
 # UFW No Ping
 echo
 echo "=== NoPing in UFW Setup ==="
