@@ -235,6 +235,7 @@ done
 
 echo "Configuring $PROVIDER_NAME (DNS over TLS: $ENABLE_DOT)..."
 
+# Настройка systemd-resolved (глобально)
 if systemctl list-unit-files | grep -q "systemd-resolved"; then
     rm -f /etc/systemd/resolved.conf.d/dot-custom.conf 2>/dev/null || true
     mkdir -p /etc/systemd/resolved.conf.d
@@ -251,15 +252,11 @@ EOF
     systemctl enable systemd-resolved --now 2>/dev/null || true
     systemctl restart systemd-resolved || true
     
-    # --- КЛЮЧЕВАЯ СТРОКА: привязываем DNS к активному интерфейсу ---
-    INTERFACE_NAME=$(ip -4 route show default | awk '{print $5}' | head -n 1)
-    [ -n "$INTERFACE_NAME" ] && resolvectl dns "$INTERFACE_NAME" $DNS_FINAL 2>/dev/null || true
-    # ------------------------------------------------------------
-    
     if [ -f /run/systemd/resolve/stub-resolv.conf ]; then
         ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
     fi
     
+    # Очистка кэша
     resolvectl flush-caches 2>/dev/null || true
     
     echo -e "\n=== Verification ==="
@@ -278,37 +275,6 @@ else
         echo "nameserver $ip" >> /etc/resolv.conf
     done
     echo "Static resolv.conf configured."
-fi
-
-# SSH && UFW
-echo
-echo "=== IPv6 Configuration in UFW ==="
-if [ -f /proc/net/if_inet6 ]; then
-    while true; do
-        echo "Do you want to DISABLE IPv6 in UFW? (y/n) [Default: n]"
-        read -p "Your choice: " IPV6_INPUT
-        if [ -z "$IPV6_INPUT" ]; then
-            IPV6_INPUT="n"
-            echo -e "\e[1A\e[KYour choice: n"
-        fi
-        if [ "${IPV6_INPUT,,}" = "y" ] || [ "${IPV6_INPUT,,}" = "yes" ]; then
-            echo "Disabling IPv6 in UFW configuration..."
-            sed -i 's/IPV6=yes/IPV6=no/' /etc/default/ufw
-            break
-        elif [ "${IPV6_INPUT,,}" = "n" ] || [ "${IPV6_INPUT,,}" = "no" ]; then
-            echo "Keeping IPv6 enabled in UFW configuration."
-            sed -i 's/IPV6=no/IPV6=yes/' /etc/default/ufw
-            break
-        else
-            echo -e "\e[1A\e[KError: Invalid input. Please enter 'y' or 'n'"
-            sleep 1
-            echo -e "\e[1A\e[K"
-        fi
-    done
-else
-    echo "Notice: IPv6 is disabled or not supported by your host provider."
-    echo "Disabling IPv6 in UFW automatically to prevent system errors..."
-    sed -i 's/IPV6=yes/IPV6=no/' /etc/default/ufw
 fi
 
 # UFW No Ping
