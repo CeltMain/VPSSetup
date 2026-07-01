@@ -193,22 +193,22 @@ if [ "$ENABLE_DOT" = true ]; then
         
         case "$DNS_CHOICE" in
             1)
-                DNS_SERVERS="1.1.1.1 1.0.0.1"
+                DNS_SERVERS="1.1.1.1#cloudflare-dns.com 1.0.0.1#cloudflare-dns.com"
                 PROVIDER_NAME="Cloudflare"
                 break
                 ;;
             2)
-                DNS_SERVERS="9.9.9.9 149.112.112.112"
+                DNS_SERVERS="9.9.9.9#dns.quad9.net 149.112.112.112#dns.quad9.net"
                 PROVIDER_NAME="Quad9"
                 break
                 ;;
             3)
-                DNS_SERVERS="8.8.8.8 8.8.4.4"
+                DNS_SERVERS="8.8.8.8#dns.google 8.8.4.4#dns.google"
                 PROVIDER_NAME="Google"
                 break
                 ;;
             4)
-                DNS_SERVERS="77.88.8.8 77.88.8.1"
+                DNS_SERVERS="77.88.8.8#common.dot.yandex.net 77.88.8.1#common.dot.yandex.net"
                 PROVIDER_NAME="Yandex"
                 break
                 ;;
