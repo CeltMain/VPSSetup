@@ -367,11 +367,9 @@ fi
 echo
 echo "=== NoPing in UFW Setup ==="
 if [ -f /etc/ufw/before.rules ]; then
-    # Точечно отключаем пинг для IPv4
     sed -i 's/-A ufw-before-input -p icmp --icmp-type echo-request -j ACCEPT/-A ufw-before-input -p icmp --icmp-type echo-request -j DROP/g' /etc/ufw/before.rules
     sed -i 's/-A ufw-before-forward -p icmp --icmp-type echo-request -j ACCEPT/-A ufw-before-forward -p icmp --icmp-type echo-request -j DROP/g' /etc/ufw/before.rules
     
-    # Защита от лавины ICMP-запросов (source-quench)
     if ! grep -Fq "source-quench -j DROP" /etc/ufw/before.rules; then
         sed -i '/-A ufw-before-input -p icmp --icmp-type echo-request -j DROP/a -A ufw-before-input -p icmp --icmp-type source-quench -j DROP' /etc/ufw/before.rules
         echo "Done, source-quench row added"
@@ -380,7 +378,6 @@ if [ -f /etc/ufw/before.rules ]; then
     fi
 fi
 
-# Точечно отключаем пинг для IPv6
 if [ -f /etc/ufw/before6.rules ]; then
     sed -i 's/-A ufw-before-input -p icmpv6 --icmp-type echo-request -j ACCEPT/-A ufw-before-input -p icmpv6 --icmp-type echo-request -j DROP/g' /etc/ufw/before6.rules
     sed -i 's/-A ufw-before-forward -p icmpv6 --icmp-type echo-request -j ACCEPT/-A ufw-before-forward -p icmpv6 --icmp-type echo-request -j DROP/g' /etc/ufw/before6.rules
@@ -390,7 +387,6 @@ echo "Success"
 # SSH-port configure
 echo
 echo "=== Configuring SSH Port ==="
-# ЗАЩИТА: Если переменная SSH_PORT пустая, вытаскиваем порт из текущей конфигурации системы, чтобы не сломать доступ
 if [ -z "$SSH_PORT" ]; then
     SSH_PORT=$(grep -E "^Port [0-9]+" /etc/ssh/sshd_config | awk '{print $2}')
     [ -z "$SSH_PORT" ] && SSH_PORT=22
@@ -401,36 +397,41 @@ sed -i "s/^#\?Port .*/Port $SSH_PORT/" /etc/ssh/sshd_config
 rm -f /etc/ssh/sshd_config.d/*.conf || true
 mkdir -p /run/sshd
 
-# Проверяем конфигурацию SSH на ошибки перед перезапуском
 if sshd -t; then
     systemctl daemon-reload
     systemctl restart ssh.socket ssh.service || systemctl restart ssh
 else
-    echo "Warning: SSH configuration test failed. Reverting changes to maintain access."
+    echo "Warning: SSH configuration test failed. Reverting changes."
 fi
 
-echo "Updating firewall rules..."
-# Сначала сбрасываем старые правила, чтобы не копить дубли
-ufw delete allow "$SSH_PORT"/tcp >/dev/null 2>&1 || true
-ufw delete allow 443/tcp >/dev/null 2>&1 || true
+echo "Cleaning up old firewall rules..."
+sudo ufw delete allow "$SSH_PORT"/tcp >/dev/null 2>&1 || true
+sudo ufw delete allow 443/tcp >/dev/null 2>&1 || true
 
-# Добавляем жесткие правила для доступа к SSH, VPN (443) и веб-панели 3x-ui
-ufw allow "$SSH_PORT"/tcp comment 'SSH Custom Port'
-ufw allow 443/tcp comment 'VLESS Reality Port'
-
-# ДОБАВЛЕНО: Автоматически находим порт веб-интерфейса вашей панели 3x-ui и открываем его в UFW
-if [ -f /etc/x-ui/x-ui.db ]; then
-    XUI_PORT=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webPort';" 2>/dev/null)
-    if [ -n "$XUI_PORT" ]; then
-        ufw allow "$XUI_PORT"/tcp comment '3x-ui Web Panel'
-    fi
-fi
+ufw allow "$SSH_PORT"/tcp comment 'SSH Custom Port' >/dev/null 2>&1 || true
+ufw allow 443/tcp >/dev/null 2>&1 || true
 
 echo "Enabling UFW..."
 sudo ufw --force enable >/dev/null 2>&1 || true
 
 echo -e "\n=== Final Firewall Status ==="
-sudo ufw status verbose
+ufw status verbose
+
+# Auto Security Updates
+echo
+echo "=== Enabling Auto Security Updates Setup ==="
+echo "Checking for background package managers..."
+while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do 
+    echo -n "." 
+    sleep 3
+done
+echo " Package manager is free. Proceeding..."
+apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" install unattended-upgrades -y
+tee /etc/apt/apt.conf.d/20auto-upgrades > /dev/null <<EOT
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+EOT
+echo "Done"
 
 # Auto Security Updates (Оставлен один чистый блок)
 echo
