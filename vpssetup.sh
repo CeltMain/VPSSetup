@@ -235,7 +235,6 @@ done
 
 echo "Configuring $PROVIDER_NAME (DNS over TLS: $ENABLE_DOT)..."
 
-# Настройка systemd-resolved (глобально)
 if systemctl list-unit-files | grep -q "systemd-resolved"; then
     rm -f /etc/systemd/resolved.conf.d/dot-custom.conf 2>/dev/null || true
     mkdir -p /etc/systemd/resolved.conf.d
@@ -252,11 +251,15 @@ EOF
     systemctl enable systemd-resolved --now 2>/dev/null || true
     systemctl restart systemd-resolved || true
     
+    # --- КЛЮЧЕВАЯ СТРОКА: привязываем DNS к активному интерфейсу ---
+    INTERFACE_NAME=$(ip -4 route show default | awk '{print $5}' | head -n 1)
+    [ -n "$INTERFACE_NAME" ] && resolvectl dns "$INTERFACE_NAME" $DNS_FINAL 2>/dev/null || true
+    # ------------------------------------------------------------
+    
     if [ -f /run/systemd/resolve/stub-resolv.conf ]; then
         ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
     fi
     
-    # Очистка кэша
     resolvectl flush-caches 2>/dev/null || true
     
     echo -e "\n=== Verification ==="
