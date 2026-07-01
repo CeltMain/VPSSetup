@@ -404,36 +404,28 @@ else
     echo "Warning: SSH configuration test failed. Reverting changes."
 fi
 
-echo "Cleaning up old firewall rules..."
+echo "Updating firewall rules..."
 sudo ufw delete allow "$SSH_PORT"/tcp >/dev/null 2>&1 || true
 sudo ufw delete allow 443/tcp >/dev/null 2>&1 || true
 
 ufw allow "$SSH_PORT"/tcp comment 'SSH Custom Port' >/dev/null 2>&1 || true
-ufw allow 443/tcp >/dev/null 2>&1 || true
+ufw allow 443/tcp comment 'VLESS Reality Port' >/dev/null 2>&1 || true
+
+# Автоматически находим порт веб-интерфейса вашей панели 3x-ui и открываем его в UFW
+if [ -f /etc/x-ui/x-ui.db ]; then
+    XUI_PORT=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webPort';" 2>/dev/null)
+    if [ -n "$XUI_PORT" ]; then
+        ufw allow "$XUI_PORT"/tcp comment '3x-ui Web Panel' >/dev/null 2>&1 || true
+    fi
+fi
 
 echo "Enabling UFW..."
 sudo ufw --force enable >/dev/null 2>&1 || true
 
 echo -e "\n=== Final Firewall Status ==="
-ufw status verbose
+sudo ufw status | cat
 
 # Auto Security Updates
-echo
-echo "=== Enabling Auto Security Updates Setup ==="
-echo "Checking for background package managers..."
-while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do 
-    echo -n "." 
-    sleep 3
-done
-echo " Package manager is free. Proceeding..."
-apt-get -o Dpkg::Options::="--force-confold" -o Dpkg::Options::="--force-confdef" install unattended-upgrades -y
-tee /etc/apt/apt.conf.d/20auto-upgrades > /dev/null <<EOT
-APT::Periodic::Update-Package-Lists "1";
-APT::Periodic::Unattended-Upgrade "1";
-EOT
-echo "Done"
-
-# Auto Security Updates (Оставлен один чистый блок)
 echo
 echo "=== Enabling Auto Security Updates Setup ==="
 echo "Checking for background package managers..."
