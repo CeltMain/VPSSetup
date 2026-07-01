@@ -254,12 +254,10 @@ if [ -n "$NETPLAN_FILE" ] && [ -f "$NETPLAN_FILE" ]; then
     # Сначала удаляем старый блок nameservers (ориентируясь на 6 пробелов перед addresses)
     sed -i '/nameservers:/d; /^[[:space:]]\{6\}addresses:/d; /^[[:space:]]*- [0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/d' "$NETPLAN_FILE"
     
-    # ИСПРАВЛЕНИЕ: Используем полностью безопасный awk для вставки блока без ломающих спецсимволов \n
-    # Находим строку с сетевым интерфейсом и дописываем под неё структуру nameservers
+    # ВОТ ЗДЕСЬ ВСЁ ДОЛЖНО БЫТЬ ЗАКРЫТО КОРРЕКТНО:
     awk -v iface="        $INTERFACE_NAME:" -v ips="$DNS_IPS" '
     {
         print $0
-        # Если строка содержит имя интерфейса с нужным отступом, добавляем под неё блок DNS
         if ($0 ~ "^  [[:space:]]*" substr(iface, 9) || $0 ~ "^[[:space:]]*" iface) {
             print "      nameservers:"
             print "        addresses:"
@@ -271,6 +269,8 @@ if [ -n "$NETPLAN_FILE" ] && [ -f "$NETPLAN_FILE" ]; then
     }' "$NETPLAN_FILE" > "${NETPLAN_FILE}.tmp" && mv "${NETPLAN_FILE}.tmp" "$NETPLAN_FILE"
     
     netplan apply >/dev/null 2>&1 || true
+fi
+
 fi
 
 # Шаг 2. Настройка глобального демона systemd-resolved
