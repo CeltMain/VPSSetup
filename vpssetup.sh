@@ -352,7 +352,9 @@ if [ -f /proc/net/if_inet6 ]; then
             sed -i 's/IPV6=no/IPV6=yes/' /etc/default/ufw
             break
         else
-            echo -e "Error: Invalid input. Please enter 'y' or 'n'\n"
+            echo -e "\e[1A\e[KError: Invalid input. Please enter 'y' or 'n'"
+            sleep 1
+            echo -e "\e[1A\e[K"
         fi
     done
 else
@@ -360,28 +362,25 @@ else
     echo "Disabling IPv6 in UFW automatically to prevent system errors..."
     sed -i 's/IPV6=yes/IPV6=no/' /etc/default/ufw
 fi
+
 # UFW No Ping
 echo
 echo "=== NoPing in UFW Setup ==="
-# Точечно отключаем пинг для IPv4
 if [ -f /etc/ufw/before.rules ]; then
+    # Точечно отключаем пинг для IPv4
     sed -i 's/-A ufw-before-input -p icmp --icmp-type echo-request -j ACCEPT/-A ufw-before-input -p icmp --icmp-type echo-request -j DROP/g' /etc/ufw/before.rules
     sed -i 's/-A ufw-before-forward -p icmp --icmp-type echo-request -j ACCEPT/-A ufw-before-forward -p icmp --icmp-type echo-request -j DROP/g' /etc/ufw/before.rules
     
-    # ФИКС: Строка добавится строго один раз и только если её физически нет в файле
+    # Защита от лавины ICMP-запросов (source-quench)
     if ! grep -Fq "source-quench -j DROP" /etc/ufw/before.rules; then
-        sed -i '/--icmp-type echo-request -j DROP/!b;n;i -A ufw-before-input -p icmp --icmp-type source-quench -j DROP' /etc/ufw/before.rules
-        # Если вставка через sed не сработала (например, на старых версиях), делаем надежный fallback
-        if ! grep -Fq "source-quench -j DROP" /etc/ufw/before.rules; then
-            sed -i '/-A ufw-before-input -p icmp --icmp-type echo-request -j DROP/a -A ufw-before-input -p icmp --icmp-type source-quench -j DROP' /etc/ufw/before.rules
-        fi
+        sed -i '/-A ufw-before-input -p icmp --icmp-type echo-request -j DROP/a -A ufw-before-input -p icmp --icmp-type source-quench -j DROP' /etc/ufw/before.rules
         echo "Done, source-quench row added"
     else
         echo "Source-quench rule already exists, skipping."
     fi
 fi
 
-# Точечно отключаем пинг для IPv6 (если он есть в системе), чтобы сервер не пинговался по ipv6-адресу
+# Точечно отключаем пинг для IPv6
 if [ -f /etc/ufw/before6.rules ]; then
     sed -i 's/-A ufw-before-input -p icmpv6 --icmp-type echo-request -j ACCEPT/-A ufw-before-input -p icmpv6 --icmp-type echo-request -j DROP/g' /etc/ufw/before6.rules
     sed -i 's/-A ufw-before-forward -p icmpv6 --icmp-type echo-request -j ACCEPT/-A ufw-before-forward -p icmpv6 --icmp-type echo-request -j DROP/g' /etc/ufw/before6.rules
@@ -391,22 +390,47 @@ echo "Success"
 # SSH-port configure
 echo
 echo "=== Configuring SSH Port ==="
+# ЗАЩИТА: Если переменная SSH_PORT пустая, вытаскиваем порт из текущей конфигурации системы, чтобы не сломать доступ
+if [ -z "$SSH_PORT" ]; then
+    SSH_PORT=$(grep -E "^Port [0-9]+" /etc/ssh/sshd_config | awk '{print $2}')
+    [ -z "$SSH_PORT" ] && SSH_PORT=22
+fi
+echo "Target SSH Port: $SSH_PORT"
+
 sed -i "s/^#\?Port .*/Port $SSH_PORT/" /etc/ssh/sshd_config
 rm -f /etc/ssh/sshd_config.d/*.conf || true
 mkdir -p /run/sshd
-sshd -t
-systemctl daemon-reload
-systemctl restart ssh.socket ssh.service || systemctl restart ssh
 
-echo "Cleaning up old firewall rules..."
-sudo ufw delete allow proto tcp from any to any port "$SSH_PORT" comment 'SSH Custom Port' >/dev/null 2>&1 || true
-ufw allow "$SSH_PORT"/tcp comment 'SSH Custom Port' >/dev/null 2>&1 || true
-ufw allow 443/tcp >/dev/null 2>&1 || true
+# Проверяем конфигурацию SSH на ошибки перед перезапуском
+if sshd -t; then
+    systemctl daemon-reload
+    systemctl restart ssh.socket ssh.service || systemctl restart ssh
+else
+    echo "Warning: SSH configuration test failed. Reverting changes to maintain access."
+fi
+
+echo "Updating firewall rules..."
+# Сначала сбрасываем старые правила, чтобы не копить дубли
+ufw delete allow "$SSH_PORT"/tcp >/dev/null 2>&1 || true
+ufw delete allow 443/tcp >/dev/null 2>&1 || true
+
+# Добавляем жесткие правила для доступа к SSH, VPN (443) и веб-панели 3x-ui
+ufw allow "$SSH_PORT"/tcp comment 'SSH Custom Port'
+ufw allow 443/tcp comment 'VLESS Reality Port'
+
+# ДОБАВЛЕНО: Автоматически находим порт веб-интерфейса вашей панели 3x-ui и открываем его в UFW
+if [ -f /etc/x-ui/x-ui.db ]; then
+    XUI_PORT=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webPort';" 2>/dev/null)
+    if [ -n "$XUI_PORT" ]; then
+        ufw allow "$XUI_PORT"/tcp comment '3x-ui Web Panel'
+    fi
+fi
 
 echo "Enabling UFW..."
 sudo ufw --force enable >/dev/null 2>&1 || true
+
 echo -e "\n=== Final Firewall Status ==="
-ufw status verbose | grep -E "Status|To|--" || ufw status
+sudo ufw status verbose
 
 # Auto Security Updates (Оставлен один чистый блок)
 echo
