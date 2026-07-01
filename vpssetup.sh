@@ -165,6 +165,13 @@ free -h
 # DNS Configuration
 echo
 echo "=== DNS Setup ==="
+
+# Автоматически определяем имя активного сетевого интерфейса (например, eth0 или ens3)
+INTERFACE_NAME=$(ip -4 route show default | awk '{print $5}' | head -n 1)
+if [ -z "$INTERFACE_NAME" ]; then
+    INTERFACE_NAME="eth0" # Фолбэк, если не удалось определить
+fi
+
 while true; do
     echo "Select DNS provider:"
     echo "  1) Cloudflare (Speed) [Default]"
@@ -210,6 +217,7 @@ while true; do
             ;;
     esac
 done
+
 echo
 while true; do
     echo "Do you want to enable DNS over TLS (DoT) for $PROVIDER_NAME? (y/n) [Default: y]"
@@ -220,31 +228,55 @@ while true; do
     fi
     if [ "${DOT_INPUT,,}" = "y" ] || [ "${DOT_INPUT,,}" = "yes" ]; then
         ENABLE_DOT="yes"
-        DNS_FINAL_SERVERS="$DNS_DOT_SERVERS"
-        DNSSEC_POLICY="no"
+        DNS_RESOLVED_SERVERS="$DNS_DOT_SERVERS"
         break
     elif [ "${DOT_INPUT,,}" = "n" ] || [ "${DOT_INPUT,,}" = "no" ]; then
         ENABLE_DOT="no"
-        DNS_FINAL_SERVERS="$DNS_IPS"
-        DNSSEC_POLICY="no"
+        DNS_RESOLVED_SERVERS="$DNS_IPS"
         break
     else
         echo -e "Error: Invalid input. Please enter 'y' or 'n'\n"
     fi
 done
 
-echo "Configuring $PROVIDER_NAME (DNS over TLS: $ENABLE_DOT, DNSSEC: $DNSSEC_POLICY)..."
+echo "Configuring $PROVIDER_NAME (DNS over TLS: $ENABLE_DOT) on interface $INTERFACE_NAME..."
 
+# Шаг 1. Безопасное обновление Netplan (только чистые IP-адреса, без спецсимволов)
+NETPLAN_FILE=$(ls /etc/netplan/*.yaml 2>/dev/null | head -n 1)
+if [ -n "$NETPLAN_FILE" ] && [ -f "$NETPLAN_FILE" ]; then
+    echo "Updating Netplan configuration in $NETPLAN_FILE..."
+    # Создаем бэкап перед изменением
+    cp "$NETPLAN_FILE" "${NETPLAN_FILE}.bak_dns"
+    
+    # ЮВЕЛИРНОЕ ИСПРАВЛЕНИЕ: Удаляем только блок nameservers, dns-addresses и дефисы с IP.
+    # [[:space:]]\{6\}addresses: гарантирует, что удалится только DNS-строка (с 6 пробелами), 
+    # а системный IP (с 4 пробелами) останется нетронутым.
+    sed -i '/nameservers:/d; /^[[:space:]]\{6\}addresses:/d; /^[[:space:]]*- [0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/d' "$NETPLAN_FILE"
+    
+    # Формируем массив новых IP для вставки в YAML с сохранением вашей структуры отступов (2 пробела)
+    YAML_IPS=""
+    for ip in $DNS_IPS; do
+        YAML_IPS="${YAML_IPS}        - $ip\n"
+    fi
+    YAML_IPS=$(echo -e "$YAML_IPS" | sed 's/\n$//')
+
+    # Внедряем чистые IP-адреса DNS строго после матчинга интерфейса
+    sed -i "/$INTERFACE_NAME:/a\      nameservers:\n        addresses:\n$YAML_IPS" "$NETPLAN_FILE"
+    
+    # Применяем настройки сети Netplan
+    netplan apply >/dev/null 2>&1 || true
+fi
+
+# Шаг 2. Настройка глобального демона systemd-resolved
 if systemctl list-unit-files | grep -q "systemd-resolved"; then
     rm -f /etc/systemd/resolved.conf.d/dot-custom.conf || true
     mkdir -p /etc/systemd/resolved.conf.d
     
-    # Чистая конфигурация БЕЗ разрушительной строки Domains=~.
     tee /etc/systemd/resolved.conf.d/dot-custom.conf > /dev/null <<EOT
 [Resolve]
-DNS=$DNS_FINAL_SERVERS
+DNS=$DNS_RESOLVED_SERVERS
 DNSOverTLS=$ENABLE_DOT
-DNSSEC=$DNSSEC_POLICY
+DNSSEC=no
 FallbackDNS=8.8.8.8 1.1.1.1
 EOT
 
@@ -256,41 +288,26 @@ EOT
         ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
     fi  
     
-    # Сброс кэша оперативной памяти
+    # Шаг 3. Фиксация DoT-хостов напрямую на сетевом интерфейсе (Лечит утечку Xray)
+    if [ "$ENABLE_DOT" = "yes" ]; then
+        resolvectl dns "$INTERFACE_NAME" $DNS_DOT_SERVERS >/dev/null 2>&1 || true
+    else
+        resolvectl dns "$INTERFACE_NAME" $DNS_IPS >/dev/null 2>&1 || true
+    fi
+    
     resolvectl flush-caches >/dev/null 2>&1 || true
     
     echo -e "\n=== Verification ==="
-    # Выводим общий статус. Так как кастомных доменных петель больше нет, 
-    # здесь отобразится чистая и правильная глобальная конфигурация.
-    resolvectl status
+    resolvectl status "$INTERFACE_NAME"
     
-    echo -e "\n=== DNS Speed & Connectivity Test ==="
-    if command -v dig >/dev/null 2>&1; then
-        echo "Measuring DNS response time to $TEST_DOMAIN via secure resolver..."
-        
-        # «Прогреваем» TLS-сессию один раз в фоне, чтобы замер ниже не тормозил
-        dig @127.0.0.53 "$TEST_DOMAIN" +short >/dev/null 2>&1 || true
-        
-        # Настоящий замер скорости
-        SPEED_TEST=$(dig @127.0.0.53 "$TEST_DOMAIN" | grep "Query time" || true)
-        if [ -n "$SPEED_TEST" ]; then
-            echo "Result: $SPEED_TEST"
-        else
-            echo "DNS Status: Connected, but response time log is unavailable."
-        fi
+    echo -e "\n=== DNS Connectivity Test ==="
+    if ping -c 2 -W 3 "$TEST_DOMAIN" >/dev/null 2>&1; then
+        echo "DNS Status: OK (Domain successfully resolved and pinged)."
     else
-        echo "Utility 'dnsutils' (dig) not found. Performing fallback ping test..."
-        if ping -c 2 -W 3 "$TEST_DOMAIN" >/dev/null 2>&1; then
-            echo "DNS Status: OK (Domain successfully resolved and pinged)."
-        else
-            echo "DNS Status: WARNING (Network might be unreachable or domain resolve failed)."
-        fi
+        echo "DNS Status: WARNING (Network unreachable or resolve failed)."
     fi
 else
-    echo "Warning: systemd-resolved is not active. Configuring fallback via classic /etc/resolv.conf..."
-    if [ "$ENABLE_DOT" = "yes" ]; then
-        echo "Notice: DNS over TLS requires systemd-resolved. Setting up standard encrypted fallback instead."
-    fi
+    echo "Warning: systemd-resolved is not active. Configuring classic /etc/resolv.conf..."
     sudo rm -f /etc/resolv.conf
     for ip in $DNS_IPS; do
         echo "nameserver $ip" | sudo tee -a /etc/resolv.conf > /dev/null
