@@ -405,17 +405,19 @@ else
 fi
 
 echo "Updating firewall rules..."
-sudo ufw delete allow "$SSH_PORT"/tcp >/dev/null 2>&1 || true
-sudo ufw delete allow 443/tcp >/dev/null 2>&1 || true
+# ДОБАВЛЕН ФЛАГ --force: Теперь UFW выполнит удаление молча и не сожрет код скрипта
+sudo ufw --force delete allow "$SSH_PORT"/tcp >/dev/null 2>&1 || true
+sudo ufw --force delete allow 443/tcp >/dev/null 2>&1 || true
 
-ufw allow "$SSH_PORT"/tcp comment 'SSH Custom Port' >/dev/null 2>&1 || true
-ufw allow 443/tcp comment 'VLESS Reality Port' >/dev/null 2>&1 || true
+# Добавляем правила тоже в неинтерактивном режиме
+sudo ufw allow "$SSH_PORT"/tcp comment 'SSH Custom Port' >/dev/null 2>&1 || true
+sudo ufw allow 443/tcp comment 'VLESS Reality Port' >/dev/null 2>&1 || true
 
 # Автоматически находим порт веб-интерфейса вашей панели 3x-ui и открываем его в UFW
 if [ -f /etc/x-ui/x-ui.db ]; then
     XUI_PORT=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webPort';" 2>/dev/null)
     if [ -n "$XUI_PORT" ]; then
-        ufw allow "$XUI_PORT"/tcp comment '3x-ui Web Panel' >/dev/null 2>&1 || true
+        sudo ufw allow "$XUI_PORT"/tcp comment '3x-ui Web Panel' >/dev/null 2>&1 || true
     fi
 fi
 
