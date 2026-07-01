@@ -352,23 +352,46 @@ if [ -z "$SSH_PORT" ]; then
 fi
 echo "Target SSH Port: $SSH_PORT"
 
+# 1. Меняем порт в классическом конфиге
 sed -i "s/^#\?Port .*/Port $SSH_PORT/" /etc/ssh/sshd_config
 rm -f /etc/ssh/sshd_config.d/*.conf || true
 mkdir -p /run/sshd
 
+# 2. ИСПРАВЛЕНИЕ ДЛЯ СОВРЕМЕННЫХ UBUNTU (Перенастройка системного сокета под новый порт)
+if systemctl list-units --type=socket | grep -q "ssh.socket"; then
+    echo "Modern systemd socket-activation detected. Adjusting SSH socket..."
+    mkdir -p /etc/systemd/system/ssh.socket.d
+    cat > /etc/systemd/system/ssh.socket.d/listen.conf <<EOF
+[Socket]
+ListenStream=
+ListenStream=$SSH_PORT
+EOF
+fi
+
+# 3. Проверяем синтаксис перед перезапуском
 if sshd -t; then
+    echo "SSH configuration syntax is OK. Restarting services..."
     systemctl daemon-reload
-    systemctl restart ssh.socket ssh.service || systemctl restart ssh
+    
+    # Мягко перезапускаем сокет и службу (не разрывая текущую активную сессию)
+    if systemctl is-active --quiet ssh.socket; then
+        systemctl stop ssh.socket
+        systemctl stop ssh
+        systemctl start ssh.socket
+        systemctl start ssh
+    else
+        systemctl restart sshd || systemctl restart ssh || true
+    fi
 else
-    echo "Warning: SSH configuration test failed. Reverting changes."
+    echo "Warning: SSH configuration test failed! Reverting port changes to maintain access."
+    sed -i "s/^Port .*/Port 22/" /etc/ssh/sshd_config
+    rm -rf /etc/systemd/system/ssh.socket.d
+    systemctl daemon-reload
+    systemctl restart sshd || systemctl restart ssh || true
 fi
 
 echo "Updating firewall rules..."
-# ДОБАВЛЕН ФЛАГ --force: Теперь UFW выполнит удаление молча и не сожрет код скрипта
-sudo ufw --force delete allow "$SSH_PORT"/tcp >/dev/null 2>&1 || true
-sudo ufw --force delete allow 443/tcp >/dev/null 2>&1 || true
-
-# Добавляем правила тоже в неинтерактивном режиме
+# Предварительно открываем порт, чтобы UFW reload/enable его не заблокировал
 sudo ufw allow "$SSH_PORT"/tcp comment 'SSH Custom Port' >/dev/null 2>&1 || true
 sudo ufw allow 443/tcp comment 'VLESS Reality Port' >/dev/null 2>&1 || true
 
@@ -380,8 +403,14 @@ if [ -f /etc/x-ui/x-ui.db ]; then
     fi
 fi
 
-echo "Enabling UFW..."
-sudo ufw --force enable >/dev/null 2>&1 || true
+echo "Safely applying firewall rules..."
+# ИСПРАВЛЕНИЕ: Вместо жесткого enable, который рвет соединение, делаем мягкий reload.
+# Если UFW был выключен — аккуратно активируем его.
+if systemctl is-active --quiet ufw; then
+    sudo ufw reload >/dev/null 2>&1 || true
+else
+    sudo ufw --force enable >/dev/null 2>&1 || true
+fi
 
 echo -e "\n=== Final Firewall Status ==="
 sudo ufw status | cat
